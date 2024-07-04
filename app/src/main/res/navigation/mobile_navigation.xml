@@ -22,4 +22,9 @@
         android:name="com.example.berryharvest.ui.slideshow.SlideshowFragment"
         android:label="@string/menu_workers_registration"
         tools:layout="@layout/fragment_slideshow" />
+    <fragment
+        android:id="@+id/nav_report"
+        android:name="com.example.berryharvest.ui.report.ReportFragment"
+        android:label="@string/menu_report"
+        tools:layout="@layout/fragment_report" />
 </navigation>
