@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:showIn="navigation_view">
+
+    <group android:checkableBehavior="single">
+        <item
+            android:id="@+id/nav_scanqr"
+            android:icon="@drawable/ic_menu_qr"
+            android:title="@string/menu_scanqr" />
+        <item
+            android:id="@+id/nav_assign_for_rows"
+            android:icon="@drawable/ic_menu_assign_for_rows"
+            android:title="@string/menu_assign_for_rows" />
+        <item
+            android:id="@+id/nav_workers_registration"
+            android:icon="@drawable/ic_menu_workers_registration"
+            android:title="@string/menu_workers_registration" />
+    </group>
+</menu>
