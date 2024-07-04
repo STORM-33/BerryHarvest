@@ -10,5 +10,6 @@
     <string name="menu_scanqr">Сканувати QR код</string>
     <string name="menu_assign_for_rows">Призначення на рядки</string>
     <string name="menu_workers_registration">Реєстрація працівників</string>
+    <string name="menu_report">Звіт</string>
     <string name="berry_harvest">Berry Harvest</string>
 </resources>
