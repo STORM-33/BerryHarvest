@@ -13,6 +13,8 @@ import androidx.navigation.ui.setupWithNavController
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.appcompat.app.AppCompatActivity
 import com.example.berryharvest.databinding.ActivityMainBinding
+import io.realm.kotlin.Realm
+import io.realm.kotlin.RealmConfiguration
 
 class MainActivity : AppCompatActivity() {
 
@@ -21,6 +23,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val config = RealmConfiguration.Builder(schema = setOf(/* Ваши Realm классы здесь */))
+            .name("myapp.realm")
+            .schemaVersion(1)
+            .build()
+        val realm = Realm.open(config)
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)

@@ -19,9 +19,9 @@
 
     <fragment
         android:id="@+id/nav_workers_registration"
-        android:name="com.example.berryharvest.ui.slideshow.SlideshowFragment"
+        android:name="com.example.berryharvest.ui.add_worker.AddWorkerFragment"
         android:label="@string/menu_workers_registration"
-        tools:layout="@layout/fragment_slideshow" />
+        tools:layout="@layout/fragment_add_worker" />
     <fragment
         android:id="@+id/nav_report"
         android:name="com.example.berryharvest.ui.report.ReportFragment"
