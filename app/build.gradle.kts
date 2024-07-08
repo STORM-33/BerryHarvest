@@ -40,6 +40,10 @@ android {
 }
 
 dependencies {
+    implementation("io.realm.kotlin:library-base:1.8.0")
+    implementation("io.realm.kotlin:library-sync:1.8.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
+    implementation ("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)

@@ -4,3 +4,6 @@ plugins {
     alias(libs.plugins.jetbrains.kotlin.android) apply false
     alias(libs.plugins.realm.kotlin) apply false
 }
+buildscript {
+    val kotlinVersion by extra("1.8.0")
+}
