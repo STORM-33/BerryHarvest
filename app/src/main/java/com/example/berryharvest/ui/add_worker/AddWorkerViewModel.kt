@@ -31,6 +31,23 @@ class AddWorkerViewModel : ViewModel() {
         }
     }
 
+    fun updateWorker(id: String, fullName: String, phoneNumber: String) {
+        realm.writeBlocking {
+            val worker = query<Worker>("id == $0", id).first().find()
+            worker?.let {
+                it.fullName = fullName
+                it.phoneNumber = phoneNumber
+            }
+        }
+    }
+
+    fun deleteWorker(id: String) {
+        realm.writeBlocking {
+            val worker = query<Worker>("id == $0", id).first().find()
+            worker?.let { delete(it) }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         realm.close()

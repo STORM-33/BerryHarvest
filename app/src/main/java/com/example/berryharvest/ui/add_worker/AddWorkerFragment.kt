@@ -16,6 +16,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.berryharvest.R
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import android.app.AlertDialog
 
 class AddWorkerFragment : Fragment() {
 
@@ -55,11 +56,13 @@ class AddWorkerFragment : Fragment() {
                 editTextFullName.text.clear()
                 editTextPhoneNumber.text.clear()
             } else {
-                Toast.makeText(context, "Заполните все поля", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Заповніть всі поля", Toast.LENGTH_SHORT).show()
             }
         }
 
-        workerAdapter = WorkerAdapter()
+        workerAdapter = WorkerAdapter { worker ->
+            showWorkerOptionsDialog(worker)
+        }
         recyclerViewWorkers.adapter = workerAdapter
         recyclerViewWorkers.layoutManager = LinearLayoutManager(context)
 
@@ -68,5 +71,53 @@ class AddWorkerFragment : Fragment() {
                 workerAdapter.submitList(results)
             }
         }
+    }
+
+    private fun showWorkerOptionsDialog(worker: Worker) {
+        val options = arrayOf("Змінити", "Видалити")
+        AlertDialog.Builder(requireContext())
+            .setTitle("Оберіть дію")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showEditWorkerDialog(worker)
+                    1 -> showDeleteWorkerConfirmation(worker)
+                }
+            }
+            .show()
+    }
+
+    private fun showEditWorkerDialog(worker: Worker) {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_edit_worker, null)
+        val editTextFullName = dialogView.findViewById<EditText>(R.id.editTextFullName)
+        val editTextPhoneNumber = dialogView.findViewById<EditText>(R.id.editTextPhoneNumber)
+
+        editTextFullName.setText(worker.fullName)
+        editTextPhoneNumber.setText(worker.phoneNumber)
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("Змінити дані")
+            .setView(dialogView)
+            .setPositiveButton("Зберегти") { _, _ ->
+                val newFullName = editTextFullName.text.toString()
+                val newPhoneNumber = editTextPhoneNumber.text.toString()
+                if (newFullName.isNotEmpty() && newPhoneNumber.isNotEmpty()) {
+                    viewModel.updateWorker(worker.id, newFullName, newPhoneNumber)
+                } else {
+                    Toast.makeText(context, "Заповніть всі поля", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Відміна", null)
+            .show()
+    }
+
+    private fun showDeleteWorkerConfirmation(worker: Worker) {
+        AlertDialog.Builder(requireContext())
+            .setTitle("Видалити дані")
+            .setMessage("Ви впевнені, що хочете видалити дані цього працівника?")
+            .setPositiveButton("Так") { _, _ ->
+                viewModel.deleteWorker(worker.id)
+            }
+            .setNegativeButton("Ні", null)
+            .show()
     }
 }

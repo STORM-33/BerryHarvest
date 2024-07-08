@@ -8,7 +8,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.berryharvest.R
 import com.example.berryharvest.ui.add_worker.Worker
 
-class WorkerAdapter : ListAdapter<Worker, WorkerAdapter.WorkerViewHolder>(WorkerDiffCallback()) {
+class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) : ListAdapter<Worker, WorkerAdapter.WorkerViewHolder>(WorkerDiffCallback()) {
 
     class WorkerViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val idTextView: TextView = view.findViewById(R.id.textViewId)
@@ -27,6 +27,11 @@ class WorkerAdapter : ListAdapter<Worker, WorkerAdapter.WorkerViewHolder>(Worker
         holder.idTextView.text = worker.id
         holder.fullNameTextView.text = worker.fullName
         holder.phoneNumberTextView.text = worker.phoneNumber
+
+        holder.itemView.setOnLongClickListener {
+            onItemLongClick(worker)
+            true
+        }
     }
 
     class WorkerDiffCallback : DiffUtil.ItemCallback<Worker>() {
