@@ -40,10 +40,11 @@ android {
 }
 
 dependencies {
-    implementation("io.realm.kotlin:library-base:1.8.0")
-    implementation("io.realm.kotlin:library-sync:1.8.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4")
-    implementation ("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.0")
+    implementation("io.realm.kotlin:library-base:1.11.0")
+    implementation("io.realm.kotlin:library-sync:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
@@ -58,5 +59,5 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
 
     // Realm
-    implementation(libs.realm.library.base)
+    // implementation(libs.realm.library.base)
 }
