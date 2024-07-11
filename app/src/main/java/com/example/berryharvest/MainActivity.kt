@@ -1,8 +1,10 @@
 package com.example.berryharvest
 
+import android.app.Application
 import android.os.Bundle
 import android.view.Menu
 import android.content.Intent
+import android.util.Log
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.navigation.NavigationView
 import androidx.navigation.findNavController
@@ -15,20 +17,35 @@ import androidx.appcompat.app.AppCompatActivity
 import com.example.berryharvest.databinding.ActivityMainBinding
 import io.realm.kotlin.Realm
 import io.realm.kotlin.RealmConfiguration
+import io.realm.kotlin.mongodb.App
+import io.realm.kotlin.mongodb.AppConfiguration
+import io.realm.kotlin.mongodb.Credentials
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var appBarConfiguration: AppBarConfiguration
     private lateinit var binding: ActivityMainBinding
+    private lateinit var app: App
+    private lateinit var realm: Realm
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val config = RealmConfiguration.Builder(schema = setOf())
+        val appID = "application-1-rgotpim"
+        app = App.create(appID)
+
+        val config = RealmConfiguration.Builder(schema = setOf(/* Ваши классы схемы */))
             .name("myapp.realm")
             .schemaVersion(1)
             .build()
-        val realm = Realm.open(config)
+
+        CoroutineScope(Dispatchers.Main).launch {
+            realm = Realm.open(config)
+            loginUser()
+        }
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -39,7 +56,6 @@ class MainActivity : AppCompatActivity() {
         val navView: NavigationView = binding.navView
         val navController = findNavController(R.id.nav_host_fragment_content_main)
 
-
         appBarConfiguration = AppBarConfiguration(
             setOf(
                 R.id.nav_scanqr, R.id.nav_assign_for_rows, R.id.nav_workers_registration, R.id.nav_report
@@ -47,6 +63,16 @@ class MainActivity : AppCompatActivity() {
         )
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
+    }
+
+    private suspend fun loginUser() {
+        try {
+            val user = app.login(Credentials.anonymous())
+            Log.d("REALM", "Аутентификация прошла успешно")
+
+        } catch (e: Exception) {
+            Log.e("REALM", "Ошибка аутентификации: ${e.message}")
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
