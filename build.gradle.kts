@@ -1,9 +1,21 @@
-// Top-level build file where you can add configuration options common to all sub-projects/modules.
 plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.jetbrains.kotlin.android) apply false
-    alias(libs.plugins.realm.kotlin) apply false
+    id("io.realm.kotlin") version "1.11.0" apply false
 }
+
 buildscript {
-    val kotlinVersion by extra("1.8.0")
+    dependencies {
+        classpath("io.realm:realm-gradle-plugin:10.17.0")
+    }
 }
+
+// Define project-wide properties
+extra["kotlinVersion"] = "1.9.0"
+extra["coroutinesVersion"] = "1.7.3"
+extra["lifecycleVersion"] = "2.6.2"
+extra["coreKtxVersion"] = "1.13.1"
+extra["appCompatVersion"] = "1.7.0"
+extra["materialVersion"] = "1.12.0"
+extra["constraintLayoutVersion"] = "2.1.4"
+extra["navigationVersion"] = "2.7.5"

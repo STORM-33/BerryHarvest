@@ -15,11 +15,13 @@ import androidx.navigation.ui.setupWithNavController
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.appcompat.app.AppCompatActivity
 import com.example.berryharvest.databinding.ActivityMainBinding
+import com.example.berryharvest.ui.add_worker.Worker
 import io.realm.kotlin.Realm
 import io.realm.kotlin.RealmConfiguration
 import io.realm.kotlin.mongodb.App
 import io.realm.kotlin.mongodb.AppConfiguration
 import io.realm.kotlin.mongodb.Credentials
+import io.realm.kotlin.mongodb.sync.SyncConfiguration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -37,13 +39,7 @@ class MainActivity : AppCompatActivity() {
         val appID = "application-1-rgotpim"
         app = App.create(appID)
 
-        val config = RealmConfiguration.Builder(schema = setOf(/* Ваши классы схемы */))
-            .name("myapp.realm")
-            .schemaVersion(1)
-            .build()
-
         CoroutineScope(Dispatchers.Main).launch {
-            realm = Realm.open(config)
             loginUser()
         }
 
@@ -68,10 +64,10 @@ class MainActivity : AppCompatActivity() {
     private suspend fun loginUser() {
         try {
             val user = app.login(Credentials.anonymous())
-            Log.d("REALM", "Аутентификация прошла успешно")
-
+            Log.d("REALM", "Authentication successful")
+            realm = (application as MyApplication).getRealmInstance()
         } catch (e: Exception) {
-            Log.e("REALM", "Ошибка аутентификации: ${e.message}")
+            Log.e("REALM", "Authentication error: ${e.message}")
         }
     }
 

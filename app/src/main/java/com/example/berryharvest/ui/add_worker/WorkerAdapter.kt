@@ -1,3 +1,7 @@
+
+import com.example.berryharvest.R
+import com.example.berryharvest.ui.add_worker.Worker
+import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -5,10 +9,9 @@ import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import com.example.berryharvest.R
-import com.example.berryharvest.ui.add_worker.Worker
 
-class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) : ListAdapter<Worker, WorkerAdapter.WorkerViewHolder>(WorkerDiffCallback()) {
+class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) :
+    ListAdapter<Worker, WorkerAdapter.WorkerViewHolder>(WorkerDiffCallback()) {
 
     class WorkerViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val idTextView: TextView = view.findViewById(R.id.textViewId)
@@ -24,9 +27,16 @@ class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) : ListAdapter
 
     override fun onBindViewHolder(holder: WorkerViewHolder, position: Int) {
         val worker = getItem(position)
-        holder.idTextView.text = worker.id
+        holder.idTextView.text = worker._id
         holder.fullNameTextView.text = worker.fullName
         holder.phoneNumberTextView.text = worker.phoneNumber
+
+        // Set background color based on sync status
+        if (worker.isSynced) {
+            holder.itemView.setBackgroundColor(Color.BLACK)
+        } else {
+            holder.itemView.setBackgroundColor(Color.RED)
+        }
 
         holder.itemView.setOnLongClickListener {
             onItemLongClick(worker)
@@ -36,7 +46,7 @@ class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) : ListAdapter
 
     class WorkerDiffCallback : DiffUtil.ItemCallback<Worker>() {
         override fun areItemsTheSame(oldItem: Worker, newItem: Worker): Boolean {
-            return oldItem.id == newItem.id
+            return oldItem._id == newItem._id
         }
 
         override fun areContentsTheSame(oldItem: Worker, newItem: Worker): Boolean {
@@ -44,4 +54,5 @@ class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) : ListAdapter
         }
     }
 }
+
 

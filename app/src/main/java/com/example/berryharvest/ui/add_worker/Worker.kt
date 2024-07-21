@@ -6,7 +6,8 @@ import java.util.UUID
 
 class Worker : RealmObject {
     @PrimaryKey
-    var id: String = UUID.randomUUID().toString()
+    var _id: String = UUID.randomUUID().toString()
     var fullName: String = ""
     var phoneNumber: String = ""
+    var isSynced: Boolean = false
 }

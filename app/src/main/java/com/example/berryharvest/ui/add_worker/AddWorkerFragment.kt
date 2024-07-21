@@ -17,21 +17,51 @@ import com.example.berryharvest.R
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import android.app.AlertDialog
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.Observer
+import io.realm.kotlin.Realm
 
 class AddWorkerFragment : Fragment() {
+    private val _realmLiveData = MutableLiveData<Realm>()
+    val realmLiveData: LiveData<Realm> = _realmLiveData
 
     private lateinit var viewModel: AddWorkerViewModel
     private lateinit var workerAdapter: WorkerAdapter
+    private lateinit var realm: Realm
 
     private lateinit var editTextFullName: EditText
     private lateinit var editTextPhoneNumber: EditText
     private lateinit var buttonAddWorker: Button
     private lateinit var recyclerViewWorkers: RecyclerView
 
+
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        viewModel = ViewModelProvider(this).get(AddWorkerViewModel::class.java)
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View? {
+
+        viewModel.realmLiveData.observe(viewLifecycleOwner, Observer { realm ->
+            this.realm = realm
+            initUI()
+        })
+
+        viewModel.realmLiveData.observe(viewLifecycleOwner) { realm ->
+            // Realm is now initialized and ready to use
+            // You can start observing the workers flow here
+            lifecycleScope.launch {
+                viewModel.workers.collect { workers ->
+                    workerAdapter.submitList(workers)
+                }
+            }
+        }
+
         val view = inflater.inflate(R.layout.fragment_add_worker, container, false)
 
         editTextFullName = view.findViewById(R.id.editTextFullName)
@@ -42,11 +72,7 @@ class AddWorkerFragment : Fragment() {
         return view
     }
 
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-
-        viewModel = ViewModelProvider(this).get(AddWorkerViewModel::class.java)
-
+    private fun initUI() {
         buttonAddWorker.setOnClickListener {
             val fullName = editTextFullName.text.toString()
             val phoneNumber = editTextPhoneNumber.text.toString()
@@ -72,6 +98,16 @@ class AddWorkerFragment : Fragment() {
             }
         }
     }
+
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        viewModel = ViewModelProvider(this).get(AddWorkerViewModel::class.java)
+
+
+    }
+
 
     private fun showWorkerOptionsDialog(worker: Worker) {
         val options = arrayOf("Змінити", "Видалити")
@@ -101,7 +137,7 @@ class AddWorkerFragment : Fragment() {
                 val newFullName = editTextFullName.text.toString()
                 val newPhoneNumber = editTextPhoneNumber.text.toString()
                 if (newFullName.isNotEmpty() && newPhoneNumber.isNotEmpty()) {
-                    viewModel.updateWorker(worker.id, newFullName, newPhoneNumber)
+                    viewModel.updateWorker(worker._id, newFullName, newPhoneNumber)
                 } else {
                     Toast.makeText(context, "Заповніть всі поля", Toast.LENGTH_SHORT).show()
                 }
@@ -115,7 +151,7 @@ class AddWorkerFragment : Fragment() {
             .setTitle("Видалити дані")
             .setMessage("Ви впевнені, що хочете видалити дані цього працівника?")
             .setPositiveButton("Так") { _, _ ->
-                viewModel.deleteWorker(worker.id)
+                viewModel.deleteWorker(worker._id)
             }
             .setNegativeButton("Ні", null)
             .show()
