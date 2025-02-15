@@ -1,15 +1,14 @@
-package com.example.berryharvest.ui.add_worker
+package com.example.berryharvest.ui.assign_rows
 
 import io.realm.kotlin.types.RealmObject
 import io.realm.kotlin.types.annotations.PrimaryKey
 import java.util.UUID
 
-class Worker : RealmObject {
+class Assignment : RealmObject {
     @PrimaryKey
     var _id: String = UUID.randomUUID().toString()
-    var fullName: String = ""
-    var phoneNumber: String = ""
-    var qrCode: String = ""
+    var rowNumber: Int = 0
+    var workerId: String = "" // Reference to Worker._id
     var isSynced: Boolean = false
     var isDeleted: Boolean = false
 }

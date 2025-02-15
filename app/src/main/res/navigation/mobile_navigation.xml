@@ -7,15 +7,15 @@
 
     <fragment
         android:id="@+id/nav_scanqr"
-        android:name="com.example.berryharvest.ui.home.HomeFragment"
+        android:name="com.example.berryharvest.ui.gather.GatherFragment"
         android:label="@string/menu_scanqr"
-        tools:layout="@layout/fragment_home" />
+        tools:layout="@layout/fragment_gather" />
 
     <fragment
         android:id="@+id/nav_assign_for_rows"
-        android:name="com.example.berryharvest.ui.gallery.GalleryFragment"
-        android:label="@string/menu_assign_for_rows"
-        tools:layout="@layout/fragment_gallery" />
+        android:name="com.example.berryharvest.ui.assign_rows.AssignRowsFragment"
+        android:label="Призначення на рядки"
+        tools:layout="@layout/fragment_assign_rows" />
 
     <fragment
         android:id="@+id/nav_workers_registration"

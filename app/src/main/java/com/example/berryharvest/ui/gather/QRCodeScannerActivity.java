@@ -1,4 +1,4 @@
-package com.example.berryharvest.ui.home;
+package com.example.berryharvest.ui.gather;
 
 import android.Manifest;
 import android.content.pm.PackageManager;

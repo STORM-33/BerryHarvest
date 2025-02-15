@@ -1,7 +1,7 @@
+package com.example.berryharvest.ui.add_worker
 
-import com.example.berryharvest.R
-import com.example.berryharvest.ui.add_worker.Worker
 import android.graphics.Color
+import android.graphics.Paint
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -9,6 +9,7 @@ import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
+import com.example.berryharvest.R
 
 class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) :
     ListAdapter<Worker, WorkerAdapter.WorkerViewHolder>(WorkerDiffCallback()) {
@@ -31,16 +32,22 @@ class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) :
         holder.fullNameTextView.text = worker.fullName
         holder.phoneNumberTextView.text = worker.phoneNumber
 
-        // Set background color based on sync status
-        if (worker.isSynced) {
-            holder.itemView.setBackgroundColor(Color.BLACK)
-        } else {
-            holder.itemView.setBackgroundColor(Color.RED)
+        // Установка цвета фона в зависимости от статуса синхронизации
+        when {
+            worker.isDeleted -> holder.itemView.setBackgroundColor(Color.TRANSPARENT)
+            !worker.isSynced -> holder.itemView.setBackgroundColor(Color.RED)
+            else -> holder.itemView.setBackgroundColor(Color.TRANSPARENT)
         }
 
+        // Если работник удалён, перечёркиваем текст
+        val paintFlags = if (worker.isDeleted) Paint.STRIKE_THRU_TEXT_FLAG else 0
+        holder.fullNameTextView.paintFlags = paintFlags
+        holder.phoneNumberTextView.paintFlags = paintFlags
+
+        // Обработка долгого нажатия для открытия диалога с опциями
         holder.itemView.setOnLongClickListener {
             onItemLongClick(worker)
-            true
+            true // Возвращаем true, чтобы указать, что событие обработано
         }
     }
 
@@ -50,9 +57,10 @@ class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) :
         }
 
         override fun areContentsTheSame(oldItem: Worker, newItem: Worker): Boolean {
-            return oldItem == newItem
+            return oldItem == newItem && oldItem.isSynced == newItem.isSynced && oldItem.isDeleted == newItem.isDeleted
         }
     }
 }
+
 
 

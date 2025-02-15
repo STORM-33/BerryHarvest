@@ -2,6 +2,8 @@ package com.example.berryharvest
 
 import android.app.Application
 import com.example.berryharvest.ui.add_worker.Worker
+import com.example.berryharvest.ui.assign_rows.Assignment
+import com.example.berryharvest.ui.gather.Gather
 import io.realm.kotlin.Realm
 import io.realm.kotlin.mongodb.App
 import io.realm.kotlin.mongodb.AppConfiguration
@@ -21,10 +23,14 @@ class MyApplication : Application() {
 
     fun getRealmInstance(): Realm {
         val user = runBlocking { app.login(Credentials.anonymous()) }
-        val config = SyncConfiguration.Builder(user, setOf(Worker::class))
+        val config = SyncConfiguration.Builder(
+            user,
+            setOf(Worker::class, Gather::class, Assignment::class) // Include Assignment class
+        )
             .initialSubscriptions { realm ->
-                val subscription = realm.query(Worker::class)
-                add(subscription)
+                add(realm.query(Worker::class))
+                add(realm.query(Gather::class))
+                add(realm.query(Assignment::class)) // Add Assignment subscription
             }
             .build()
         return Realm.open(config)
