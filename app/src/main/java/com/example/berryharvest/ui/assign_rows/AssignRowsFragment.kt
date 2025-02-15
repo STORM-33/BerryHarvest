@@ -12,33 +12,34 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.berryharvest.MyApplication
 import com.example.berryharvest.R
 import com.example.berryharvest.ui.add_worker.Worker
+import com.example.berryharvest.ui.components.SearchableSpinnerView
+import com.example.berryharvest.ui.components.WorkerSearchableItem
+import com.example.berryharvest.ui.components.toSearchableItem
 import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
 import kotlinx.coroutines.launch
 
 class AssignRowsFragment : Fragment() {
-
     private lateinit var realm: Realm
     private lateinit var viewModel: AssignRowsViewModel
 
     private lateinit var rowEditText: EditText
-    private lateinit var workerSpinner: Spinner
+    private lateinit var workerSearchView: SearchableSpinnerView  // заменили workerSpinner
     private lateinit var assignButton: Button
     private lateinit var assignmentsRecyclerView: RecyclerView
     private lateinit var assignmentAdapter: AssignmentAdapter
 
     private var workerList: List<Worker> = listOf()
-    private var rowList: List<Int> = (1..999).toList() // Если нужен, но теперь используется EditText
+    private var selectedWorker: Worker? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
-
         viewModel = ViewModelProvider(this).get(AssignRowsViewModel::class.java)
         realm = (requireActivity().application as MyApplication).getRealmInstance()
 
         val view = inflater.inflate(R.layout.fragment_assign_rows, container, false)
 
         rowEditText = view.findViewById(R.id.rowEditText)
-        workerSpinner = view.findViewById(R.id.workerSpinner)
+        workerSearchView = view.findViewById(R.id.workerSearchView)
         assignButton = view.findViewById(R.id.assignButton)
         assignmentsRecyclerView = view.findViewById(R.id.assignmentsRecyclerView)
 
@@ -55,7 +56,7 @@ class AssignRowsFragment : Fragment() {
         assignmentsRecyclerView.layoutManager = LinearLayoutManager(requireContext())
         assignmentsRecyclerView.adapter = assignmentAdapter
 
-        setupSpinners()
+        setupWorkerSearch()  // заменили setupSpinners()
 
         assignButton.setOnClickListener {
             assignWorkerToRow()
@@ -66,41 +67,39 @@ class AssignRowsFragment : Fragment() {
         return view
     }
 
-    private fun setupSpinners() {
-        // Populate worker spinner
+
+    private fun setupWorkerSearch() {
         lifecycleScope.launch {
             val workers = realm.query<Worker>().find()
             workerList = workers
-            val workerNames = workers.map { "${it.fullName} (${it._id})" }
-            val workerAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item, workerNames)
-            workerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-            workerSpinner.adapter = workerAdapter
+
+            workerSearchView.setAdapter(workers.map { it.toSearchableItem() })
+            workerSearchView.setOnItemSelectedListener { searchableItem ->
+                val workerItem = searchableItem as WorkerSearchableItem
+                selectedWorker = workerItem.worker
+            }
         }
     }
 
     private fun assignWorkerToRow() {
         val rowNumberText = rowEditText.text.toString().trim()
-        val selectedWorkerPosition = workerSpinner.selectedItemPosition
 
-        if (rowNumberText.isNotEmpty() && selectedWorkerPosition >= 0) {
+        if (rowNumberText.isNotEmpty() && selectedWorker != null) {
             val rowNumber = rowNumberText.toIntOrNull()
             if (rowNumber == null || rowNumber !in 1..999) {
-                Toast.makeText(requireContext(), "Please enter a valid row number (1-999)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "Введіть корректний номер (1-999)", Toast.LENGTH_SHORT).show()
                 return
             }
 
-            val worker = workerList[selectedWorkerPosition]
+            val worker = selectedWorker!!
 
-            // Create or update assignment
             lifecycleScope.launch {
                 realm.write {
                     val existingAssignment = query<Assignment>("workerId == $0", worker._id).first().find()
                     if (existingAssignment != null) {
-                        // Update row number
                         existingAssignment.rowNumber = rowNumber
                         existingAssignment.isSynced = false
                     } else {
-                        // Create new assignment
                         copyToRealm(Assignment().apply {
                             this.rowNumber = rowNumber
                             this.workerId = worker._id
@@ -108,12 +107,13 @@ class AssignRowsFragment : Fragment() {
                         })
                     }
                 }
-                Toast.makeText(requireContext(), "Worker assigned to row $rowNumber", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "Працівника призначено на ряд $rowNumber", Toast.LENGTH_SHORT).show()
                 rowEditText.text.clear()
-                workerSpinner.setSelection(0)
+                workerSearchView.clearSelection()
+                selectedWorker = null
             }
         } else {
-            Toast.makeText(requireContext(), "Please enter row number and select a worker", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), "Введіть номер рядка та виберіть працівників", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -140,7 +140,7 @@ class AssignRowsFragment : Fragment() {
         val deleteButton = dialogView.findViewById<Button>(R.id.deleteButton)
 
         val dialog = AlertDialog.Builder(requireContext())
-            .setTitle("Update Worker Assignment")
+            .setTitle("Змінити призначення")
             .setView(dialogView)
             .create()
 
@@ -155,26 +155,26 @@ class AssignRowsFragment : Fragment() {
                         managedAssignment?.isSynced = false
                     }
                 }
-                Toast.makeText(requireContext(), "Worker moved to row $newRowNumber", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "Працівник переміщений на ряд $newRowNumber", Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
             } else {
-                Toast.makeText(requireContext(), "Please enter a valid row number (1-999)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "Введіть корректний номер (1-999)", Toast.LENGTH_SHORT).show()
             }
         }
 
         deleteButton.setOnClickListener {
             AlertDialog.Builder(requireContext())
                 .setTitle("Видалити працівника з ряду?")
-                .setMessage("Are you sure you want to remove this worker from the row?")
-                .setPositiveButton("Yes") { _, _ ->
+                // .setMessage("Are you sure you want to remove this worker from the row?")
+                .setPositiveButton("Так") { _, _ ->
                     lifecycleScope.launch {
                         realm.write {
                             delete(assignment)
                         }
                     }
-                    Toast.makeText(requireContext(), "Worker removed from row", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), "Працівник видалений", Toast.LENGTH_SHORT).show()
                 }
-                .setNegativeButton("No", null)
+                .setNegativeButton("Ні", null)
                 .show()
             dialog.dismiss()
         }

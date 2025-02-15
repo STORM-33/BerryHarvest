@@ -26,6 +26,6 @@
         android:id="@+id/removeRowButton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Remove Row" />
+        android:text="Видалити ряд" />
 
 </LinearLayout>

@@ -1,5 +1,6 @@
 package com.example.berryharvest.ui.add_worker
 
+import android.annotation.SuppressLint
 import android.graphics.Color
 import android.graphics.Paint
 import android.view.LayoutInflater
@@ -26,9 +27,10 @@ class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) :
         return WorkerViewHolder(view)
     }
 
+    @SuppressLint("SetTextI18n")
     override fun onBindViewHolder(holder: WorkerViewHolder, position: Int) {
         val worker = getItem(position)
-        holder.idTextView.text = worker._id
+        holder.idTextView.text = "№: " + worker.sequenceNumber.toString()
         holder.fullNameTextView.text = worker.fullName
         holder.phoneNumberTextView.text = worker.phoneNumber
 
@@ -56,6 +58,7 @@ class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) :
             return oldItem._id == newItem._id
         }
 
+        @SuppressLint("DiffUtilEquals")
         override fun areContentsTheSame(oldItem: Worker, newItem: Worker): Boolean {
             return oldItem == newItem && oldItem.isSynced == newItem.isSynced && oldItem.isDeleted == newItem.isDeleted
         }

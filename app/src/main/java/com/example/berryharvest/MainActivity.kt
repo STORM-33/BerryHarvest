@@ -1,11 +1,9 @@
 package com.example.berryharvest
 
-import android.app.Application
 import android.os.Bundle
 import android.view.Menu
 import android.content.Intent
 import android.util.Log
-import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.navigation.NavigationView
 import androidx.navigation.findNavController
 import androidx.navigation.ui.AppBarConfiguration
@@ -15,13 +13,9 @@ import androidx.navigation.ui.setupWithNavController
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.appcompat.app.AppCompatActivity
 import com.example.berryharvest.databinding.ActivityMainBinding
-import com.example.berryharvest.ui.add_worker.Worker
 import io.realm.kotlin.Realm
-import io.realm.kotlin.RealmConfiguration
 import io.realm.kotlin.mongodb.App
-import io.realm.kotlin.mongodb.AppConfiguration
 import io.realm.kotlin.mongodb.Credentials
-import io.realm.kotlin.mongodb.sync.SyncConfiguration
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch

@@ -12,7 +12,7 @@ import io.realm.kotlin.ext.query
 
 class WorkerInRowAdapter(
     private val assignments: List<Assignment>,
-    private val onMoveWorkerClick: (Assignment) -> Unit, // Перемещение работника
+    private val onMoveWorkerClick: (Assignment) -> Unit,
     private val realm: Realm
 ) : RecyclerView.Adapter<WorkerInRowAdapter.WorkerViewHolder>() {
 
@@ -30,13 +30,13 @@ class WorkerInRowAdapter(
         val assignment = assignments[position]
 
         val worker = realm.query<Worker>("_id == $0", assignment.workerId).first().find()
-        val workerInfo = if (worker != null) "${worker.fullName} (${worker._id})" else "Unknown Worker"
+        val workerInfo = if (worker != null) "${worker.fullName} (${worker.sequenceNumber})" else "Невідомий працівник"
 
         holder.workerTextView.text = workerInfo
 
         holder.workerTextView.setOnLongClickListener {
             onMoveWorkerClick(assignment)
-            true // Возвращаем true, чтобы указать, что событие обработано
+            true
         }
     }
 

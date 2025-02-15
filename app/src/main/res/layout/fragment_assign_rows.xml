@@ -28,14 +28,14 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Row: "
+                android:text="Ряд: "
                 android:textSize="16sp" />
 
             <EditText
                 android:id="@+id/rowEditText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="Enter row number"
+                android:hint="Номер ряду"
                 android:inputType="number"
                 android:maxLength="3"
             android:layout_marginEnd="16dp" />
@@ -49,26 +49,18 @@
             android:orientation="horizontal"
             android:gravity="center_vertical">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Worker: "
-                android:textSize="16sp" />
-
-            <Spinner
-                android:id="@+id/workerSpinner"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginEnd="16dp" />
-
-            <Button
-                android:id="@+id/assignButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Assign" />
+            <com.example.berryharvest.ui.components.SearchableSpinnerView
+                android:id="@+id/workerSearchView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"/>
 
         </LinearLayout>
+
+        <Button
+            android:id="@+id/assignButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Призначити" />
     </LinearLayout>
 
     <!-- Assignments List -->

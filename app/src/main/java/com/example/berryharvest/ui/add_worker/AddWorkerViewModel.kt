@@ -11,6 +11,8 @@ import io.realm.kotlin.ext.query
 import io.realm.kotlin.mongodb.subscriptions
 import io.realm.kotlin.mongodb.sync.ConnectionState
 import io.realm.kotlin.mongodb.syncSession
+import io.realm.kotlin.query.Sort
+import io.realm.kotlin.query.max
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -86,19 +88,25 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
     fun addWorker(fullName: String, phoneNumber: String) {
         viewModelScope.launch {
             try {
+                val nextSequence = getNextSequenceNumber()
                 realm.write {
                     copyToRealm(Worker().apply {
+                        this.sequenceNumber = nextSequence
                         this.fullName = fullName
                         this.phoneNumber = phoneNumber
                         this.isSynced = networkManager.isNetworkAvailable()
                     })
                 }
                 Log.d("Realm", "Worker added: $fullName")
-                // При успешном добавлении можно вывести сообщение или выполнить другие действия
             } catch (e: Exception) {
                 Log.e("Realm", "Error adding worker: $e")
             }
         }
+    }
+
+    private fun getNextSequenceNumber(): Int {
+        val max = realm.query<Worker>().max<Int>("sequenceNumber").find()
+        return (max ?: 0) + 1
     }
 
     fun updateWorker(id: String, fullName: String, phoneNumber: String) {
@@ -137,25 +145,49 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    private suspend fun resolveSequenceConflicts() {
+        realm.write {
+            val allWorkers = query<Worker>().sort("sequenceNumber", Sort.ASCENDING).find()
+            val seenNumbers = mutableSetOf<Int>()
+
+            allWorkers.forEach { worker ->
+                if (seenNumbers.contains(worker.sequenceNumber)) {
+                    // Найден дубликат - увеличиваем номер до первого свободного
+                    var newNumber = worker.sequenceNumber + 1
+                    while (seenNumbers.contains(newNumber)) {
+                        newNumber++
+                    }
+                    worker.sequenceNumber = newNumber
+                }
+                seenNumbers.add(worker.sequenceNumber)
+            }
+        }
+    }
+
     private fun syncUnsyncedWorkers() {
         viewModelScope.launch {
-            if (!networkManager.isNetworkAvailable()) {
-                Log.d("Sync", "Network unavailable, skipping sync of unsynced workers")
-                return@launch
-            }
+            if (!networkManager.isNetworkAvailable()) return@launch
+
+            resolveSequenceConflicts() // Теперь можно вызвать
 
             realm.write {
                 val unsyncedWorkers = query<Worker>("isSynced == false").find()
-                Log.d("Sync", "Found ${unsyncedWorkers.size} unsynced workers")
                 unsyncedWorkers.forEach { worker ->
-                    if (worker.isDeleted) {
-                        delete(worker)
-                        Log.d("Sync", "Deleted worker: ${worker._id}")
-                    } else {
-                        worker.isSynced = true
-                        Log.d("Sync", "Synced worker: ${worker._id}")
-                    }
+                    worker.isSynced = true
                 }
+            }
+
+            renumberWorkersSequentially()
+        }
+    }
+
+
+    private suspend fun renumberWorkersSequentially() {
+        realm.write {
+            val workers = query<Worker>().sort("createdAt", Sort.ASCENDING).find()
+            var sequence = 1
+            workers.forEach { worker ->
+                worker.sequenceNumber = sequence++
             }
         }
     }
