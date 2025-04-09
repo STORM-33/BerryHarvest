@@ -1,7 +1,9 @@
 package com.example.berryharvest.ui.add_worker
 
+import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -11,14 +13,20 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.berryharvest.MyApplication
 import com.example.berryharvest.R
 import com.example.berryharvest.data.repository.ConnectionState
+import io.realm.kotlin.ext.query
+import io.realm.kotlin.query.max
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.UUID
 
 class AddWorkerFragment : Fragment() {
-
+    private val TAG = "AddWorkerFragment"
     private lateinit var viewModel: AddWorkerViewModel
-    private lateinit var workerAdapter: WorkerAdapter
 
     private lateinit var editTextFullName: EditText
     private lateinit var editTextPhoneNumber: EditText
@@ -26,6 +34,7 @@ class AddWorkerFragment : Fragment() {
     private lateinit var recyclerViewWorkers: RecyclerView
     private lateinit var loadingProgressBar: ProgressBar
     private lateinit var networkStatusTextView: TextView
+    private lateinit var workerAdapter: WorkerAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,8 +52,6 @@ class AddWorkerFragment : Fragment() {
         editTextPhoneNumber = view.findViewById(R.id.editTextPhoneNumber)
         buttonAddWorker = view.findViewById(R.id.buttonAddWorker)
         recyclerViewWorkers = view.findViewById(R.id.recyclerViewWorkers)
-
-        // These views might need to be added to your layout
         loadingProgressBar = view.findViewById(R.id.loadingProgressBar)
         networkStatusTextView = view.findViewById(R.id.networkStatusTextView)
 
@@ -60,12 +67,12 @@ class AddWorkerFragment : Fragment() {
             addWorker()
         }
 
+        setupObservers()
+
         return view
     }
 
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-
+    private fun setupObservers() {
         // Observe workers
         lifecycleScope.launch {
             viewModel.workers.collect { workers ->
@@ -99,6 +106,7 @@ class AddWorkerFragment : Fragment() {
         }
     }
 
+    @SuppressLint("SetTextI18n")
     private fun updateConnectionStatusUI(state: ConnectionState) {
         when (state) {
             is ConnectionState.Connected -> {
@@ -121,9 +129,71 @@ class AddWorkerFragment : Fragment() {
         val phoneNumber = editTextPhoneNumber.text.toString().trim()
 
         if (fullName.isNotEmpty() && phoneNumber.isNotEmpty()) {
-            viewModel.addWorker(fullName, phoneNumber)
-            editTextFullName.text.clear()
-            editTextPhoneNumber.text.clear()
+            // Show loading state immediately
+            loadingProgressBar.visibility = View.VISIBLE
+            buttonAddWorker.isEnabled = false
+
+            // Store input values to clear after success
+            val savedFullName = fullName
+            val savedPhoneNumber = phoneNumber
+
+            // Direct add worker operation
+            lifecycleScope.launch(Dispatchers.IO) {
+                try {
+                    Log.d(TAG, "Starting direct worker add operation")
+
+                    // Small delay to ensure UI has updated
+                    delay(100)
+
+                    // Get realm instance
+                    val app = requireActivity().application as MyApplication
+                    val realm = app.getRealmInstance()
+
+                    // Get next sequence number
+                    val maxSequence = realm.query<Worker>().max<Int>("sequenceNumber").find() ?: 0
+                    val nextSequence = maxSequence + 1
+
+                    // Generate UUID here
+                    val workerId = UUID.randomUUID().toString()
+
+                    // Quick, focused transaction
+                    realm.write {
+                        copyToRealm(Worker().apply {
+                            _id = workerId
+                            sequenceNumber = nextSequence
+                            this.fullName = savedFullName
+                            this.phoneNumber = savedPhoneNumber
+                            isSynced = false
+                        })
+                    }
+
+                    // Update UI on main thread
+                    withContext(Dispatchers.Main) {
+                        if (isAdded) {
+                            loadingProgressBar.visibility = View.GONE
+                            buttonAddWorker.isEnabled = true
+                            Toast.makeText(context, "Працівника додано", Toast.LENGTH_SHORT).show()
+
+                            // Clear input fields
+                            editTextFullName.text.clear()
+                            editTextPhoneNumber.text.clear()
+                        }
+                    }
+
+                    Log.d(TAG, "Worker added successfully. ID: $workerId")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error adding worker", e)
+
+                    // Update UI on main thread
+                    withContext(Dispatchers.Main) {
+                        if (isAdded) {
+                            loadingProgressBar.visibility = View.GONE
+                            buttonAddWorker.isEnabled = true
+                            Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
         } else {
             Toast.makeText(context, "Заповніть всі поля", Toast.LENGTH_SHORT).show()
         }
@@ -150,20 +220,61 @@ class AddWorkerFragment : Fragment() {
         editTextFullName.setText(worker.fullName)
         editTextPhoneNumber.setText(worker.phoneNumber)
 
-        AlertDialog.Builder(requireContext())
+        val dialog = AlertDialog.Builder(requireContext())
             .setTitle("Змінити дані")
             .setView(dialogView)
-            .setPositiveButton("Зберегти") { _, _ ->
+            .setPositiveButton("Зберегти") { dialogInterface, _ ->
                 val newFullName = editTextFullName.text.toString().trim()
                 val newPhoneNumber = editTextPhoneNumber.text.toString().trim()
+
                 if (newFullName.isNotEmpty() && newPhoneNumber.isNotEmpty()) {
-                    viewModel.updateWorker(worker._id, newFullName, newPhoneNumber)
+                    // Dismiss dialog and show loading
+                    dialogInterface.dismiss()
+                    loadingProgressBar.visibility = View.VISIBLE
+
+                    // Direct update operation
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        try {
+                            val app = requireActivity().application as MyApplication
+                            val realm = app.getRealmInstance()
+
+                            // Store worker ID
+                            val workerId = worker._id
+
+                            // Quick, focused transaction
+                            realm.write {
+                                query<Worker>("_id == $0", workerId)
+                                    .first().find()?.apply {
+                                        fullName = newFullName
+                                        phoneNumber = newPhoneNumber
+                                        isSynced = false
+                                    }
+                            }
+
+                            withContext(Dispatchers.Main) {
+                                if (isAdded) {
+                                    loadingProgressBar.visibility = View.GONE
+                                    Toast.makeText(context, "Дані оновлено", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error updating worker", e)
+                            withContext(Dispatchers.Main) {
+                                if (isAdded) {
+                                    loadingProgressBar.visibility = View.GONE
+                                    Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    }
                 } else {
                     Toast.makeText(context, "Заповніть всі поля", Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton("Відміна", null)
-            .show()
+            .create()
+
+        dialog.show()
     }
 
     private fun showDeleteWorkerConfirmation(worker: Worker) {
@@ -171,7 +282,42 @@ class AddWorkerFragment : Fragment() {
             .setTitle("Видалити дані")
             .setMessage("Ви впевнені, що хочете видалити дані цього працівника?")
             .setPositiveButton("Так") { _, _ ->
-                viewModel.deleteWorker(worker._id)
+                // Show loading
+                loadingProgressBar.visibility = View.VISIBLE
+
+                // Direct delete operation
+                lifecycleScope.launch(Dispatchers.IO) {
+                    try {
+                        val app = requireActivity().application as MyApplication
+                        val realm = app.getRealmInstance()
+
+                        // Store worker ID
+                        val workerId = worker._id
+
+                        // Quick, focused transaction
+                        realm.write {
+                            query<Worker>("_id == $0", workerId)
+                                .first().find()?.let {
+                                    delete(it)
+                                }
+                        }
+
+                        withContext(Dispatchers.Main) {
+                            if (isAdded) {
+                                loadingProgressBar.visibility = View.GONE
+                                Toast.makeText(context, "Працівника видалено", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error deleting worker", e)
+                        withContext(Dispatchers.Main) {
+                            if (isAdded) {
+                                loadingProgressBar.visibility = View.GONE
+                                Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                }
             }
             .setNegativeButton("Ні", null)
             .show()

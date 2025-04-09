@@ -166,33 +166,44 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
      */
     suspend fun assignWorkerToRow(workerId: String, rowNumber: Int): Result<Boolean> {
         _isLoading.value = true
+        Log.d(TAG, "Starting assignWorkerToRow process with workerId=$workerId, rowNumber=$rowNumber")
 
         try {
+            // First log the worker details for diagnostics
+            val workerDetails = workerRepository.getById(workerId)
+            Log.d(TAG, "Worker details: ${workerDetails.getOrNull()?.fullName ?: "Not found"}")
+
+            // Create and configure the assignment object
             val assignment = Assignment().apply {
                 this.workerId = workerId
                 this.rowNumber = rowNumber
             }
+            Log.d(TAG, "Created assignment object: ${assignment._id}")
 
+            // Try to add the assignment
+            Log.d(TAG, "Calling assignmentRepository.add...")
             val result = assignmentRepository.add(assignment)
+            Log.d(TAG, "assignmentRepository.add result: $result")
 
             return when (result) {
                 is Result.Success -> {
-                    Log.d(TAG, "Worker assigned to row: $rowNumber")
+                    Log.d(TAG, "Worker assigned successfully to row: $rowNumber, ID=${result.data}")
                     Result.Success(true)
                 }
                 is Result.Error -> {
-                    _error.value = "Помилка призначення: ${result.message}"
                     Log.e(TAG, "Error assigning worker", result.exception)
+                    _error.value = "Failed to assign worker: ${result.message}"
                     Result.Error(result.exception, result.message)
                 }
                 is Result.Loading -> Result.Loading
             }
         } catch (e: Exception) {
-            _error.value = "Помилка призначення: ${e.message}"
-            Log.e(TAG, "Error assigning worker", e)
+            Log.e(TAG, "Exception during assignWorkerToRow", e)
+            _error.value = "Error assigning worker: ${e.message}"
             return Result.Error(e)
         } finally {
             _isLoading.value = false
+            Log.d(TAG, "assignWorkerToRow process completed")
         }
     }
 

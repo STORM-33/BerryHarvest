@@ -1,9 +1,12 @@
 package com.example.berryharvest
 
+import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.Menu
+import android.view.View
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
@@ -22,6 +25,7 @@ import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
+    private var progressDialog: AlertDialog? = null
     private lateinit var appBarConfiguration: AppBarConfiguration
     private lateinit var binding: ActivityMainBinding
     private var realm: Realm? = null
@@ -55,10 +59,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initializeRealm() {
-        // Проверка доступности сети перед инициализацией Realm
+        // Check network availability before initializing Realm
         if (!networkManager.isNetworkAvailable()) {
             showNetworkError()
-            // Регистрируем callback для автоматической инициализации при появлении сети
+            // Register callback for automatic initialization when network becomes available
             networkManager.registerNetworkCallback { isAvailable ->
                 if (isAvailable) {
                     initializeRealmWithNetwork()
@@ -71,20 +75,100 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initializeRealmWithNetwork() {
+        // Show a progress dialog instead of relying on a view that doesn't exist
+        showProgressDialog("Connecting to database...")
+
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                // Получаем инстанс Realm из Application класса
+                // Get Realm instance from Application class
+                realm = (application as MyApplication).getRealmInstance()
+
+                // Run diagnostics
+                val diagnostics = RealmDiagnostics.checkRealmStatus(
+                    (application as MyApplication).app,
+                    realm
+                )
+
+                Log.d("REALM", diagnostics)
+
+                withContext(Dispatchers.Main) {
+                    hideProgressDialog()
+                    Log.d("REALM", "Realm initialized successfully")
+
+                    // Display success message
+                    Snackbar.make(
+                        binding.root,
+                        "Database initialized successfully",
+                        Snackbar.LENGTH_SHORT
+                    ).show()
+                }
+            } catch (e: Exception) {
+                Log.e("REALM", "Realm initialization error: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    hideProgressDialog()
+
+                    // Show a more informative error message
+                    val errorMessage = "Database initialization failed: ${e.message}"
+
+                    // Create a dialog with retry option
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Connection Error")
+                        .setMessage("$errorMessage\n\nWould you like to retry or work in offline mode?")
+                        .setPositiveButton("Retry") { _, _ -> initializeRealmWithNetwork() }
+                        .setNegativeButton("Offline Mode") { _, _ ->
+                            // Try to initialize with offline mode
+                            initializeOfflineRealm()
+                        }
+                        .show()
+                }
+            }
+        }
+    }
+
+    // And add these helper methods
+    private fun showProgressDialog(message: String) {
+        if (progressDialog == null) {
+            val dialogView = layoutInflater.inflate(R.layout.dialog_progress, null)
+            val messageTextView = dialogView.findViewById<TextView>(R.id.progressMessageTextView)
+            messageTextView.text = message
+
+            progressDialog = AlertDialog.Builder(this)
+                .setView(dialogView)
+                .setCancelable(false)
+                .create()
+        }
+
+        progressDialog?.show()
+    }
+
+    private fun hideProgressDialog() {
+        progressDialog?.dismiss()
+    }
+
+    private fun initializeOfflineRealm() {
+        showProgressDialog("Setting up offline mode...")
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // Force offline mode in application
+                (application as MyApplication).forceOfflineMode = true
+
+                // Try to get offline Realm instance
                 realm = (application as MyApplication).getRealmInstance()
 
                 withContext(Dispatchers.Main) {
-                    Log.d("REALM", "Realm initialized successfully")
-                    // Можно выполнить действия, зависящие от Realm, например:
-                    // updateUIWithRealmData()
+                    hideProgressDialog()
+                    Snackbar.make(
+                        binding.root,
+                        "Working in offline mode. Changes will sync when connection is restored.",
+                        Snackbar.LENGTH_LONG
+                    ).show()
                 }
             } catch (e: Exception) {
-                Log.e("REALM", "Realm initialization error: ${e.message}")
+                Log.e("REALM", "Offline Realm initialization error: ${e.message}", e)
                 withContext(Dispatchers.Main) {
-                    showError("Ошибка инициализации базы данных: ${e.message}")
+                    hideProgressDialog()
+                    showError("Failed to initialize offline database: ${e.message}")
                 }
             }
         }
@@ -93,7 +177,7 @@ class MainActivity : AppCompatActivity() {
     private fun showNetworkError() {
         Snackbar.make(
             binding.root,
-            "Нет подключения к сети. Некоторые функции могут быть недоступны.",
+            "Немає з’єднання. Деякі функції можуть бути недоступні",
             Snackbar.LENGTH_LONG
         ).show()
     }
@@ -131,3 +215,4 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 }
+

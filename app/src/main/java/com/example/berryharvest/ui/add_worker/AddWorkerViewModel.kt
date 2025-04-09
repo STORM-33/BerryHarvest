@@ -104,11 +104,10 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                     is Result.Loading -> { /* Already handled by isLoading state */ }
                 }
-
-                _isLoading.value = false
             } catch (e: Exception) {
                 _error.value = "Error adding worker: ${e.message}"
                 Log.e("AddWorkerViewModel", "Error adding worker", e)
+            } finally {
                 _isLoading.value = false
             }
         }
