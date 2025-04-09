@@ -1,0 +1,34 @@
+package com.example.berryharvest.data.repository
+
+import android.app.Application
+import com.example.berryharvest.data.network.EnhancedNetworkManager
+
+/**
+ * Provides access to all repositories in the application.
+ * This class follows the Service Locator pattern and ensures
+ * that only one instance of each repository is created.
+ */
+class RepositoryProvider(private val application: Application) {
+    private val networkManager = EnhancedNetworkManager(application)
+
+    // Lazy initialization for all repositories
+    val workerRepository: WorkerRepository by lazy {
+        WorkerRepository(application, networkManager)
+    }
+
+    val assignmentRepository: AssignmentRepository by lazy {
+        AssignmentRepository(application, networkManager)
+    }
+
+    // Add other repositories as needed
+
+    /**
+     * Close all repositories and release resources.
+     * Call this method when the application is shutting down.
+     */
+    fun closeAll() {
+        workerRepository.close()
+        assignmentRepository.close()
+        // Close other repositories as they are added
+    }
+}

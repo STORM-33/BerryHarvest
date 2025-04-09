@@ -5,33 +5,22 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.berryharvest.MyApplication
-import com.example.berryharvest.NetworkConnectivityManager
+import com.example.berryharvest.data.repository.ConnectionState
+import com.example.berryharvest.data.repository.Result
+import com.example.berryharvest.ui.add_worker.Worker
 import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
-import io.realm.kotlin.mongodb.subscriptions
-import io.realm.kotlin.mongodb.sync.ConnectionState
-import io.realm.kotlin.mongodb.syncSession
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.supervisorScope
-import kotlinx.coroutines.withTimeout
+
+private const val TAG = "AssignRowsViewModel"
 
 class AssignRowsViewModel(application: Application) : AndroidViewModel(application) {
     private val app: MyApplication = getApplication() as MyApplication
-    private val networkManager = NetworkConnectivityManager(application)
-
-    private var _realm: Realm? = null
-    private val realm: Realm?
-        get() = _realm
-
-    private val _realmInitialized = MutableStateFlow(false)
-    val realmInitialized: StateFlow<Boolean> = _realmInitialized.asStateFlow()
+    private val assignmentRepository = app.repositoryProvider.assignmentRepository
+    private val workerRepository = app.repositoryProvider.workerRepository
 
     private val _assignments = MutableStateFlow<List<AssignmentGroup>>(emptyList())
     val assignments: StateFlow<List<AssignmentGroup>> = _assignments.asStateFlow()
@@ -42,125 +31,287 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
+    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
+    // New Flow for worker details, exposed to the UI
+    private val _workerDetails = MutableStateFlow<Map<String, Worker>>(mapOf())
+    val workerDetails: StateFlow<Map<String, Worker>> = _workerDetails.asStateFlow()
+
+    // New Flow for all workers, for search and selection
+    private val _allWorkers = MutableStateFlow<List<Worker>>(listOf())
+    val allWorkers: StateFlow<List<Worker>> = _allWorkers.asStateFlow()
+
+    // This flag is used to signal when initialization is complete
+    private val _realmInitialized = MutableStateFlow(false)
+    val realmInitialized: StateFlow<Boolean> = _realmInitialized.asStateFlow()
+
     init {
-        initRealm()
-        observeNetworkConnectivity()
+        observeAssignments()
+        observeWorkers()
+        observeConnectionState()
     }
 
-    private fun initRealm() {
+    private fun observeAssignments() {
         viewModelScope.launch {
             _isLoading.value = true
+
+            assignmentRepository.getAllGroupedByRow().collect { result ->
+                _isLoading.value = false
+
+                when (result) {
+                    is Result.Success -> {
+                        _assignments.value = result.data
+                        _error.value = null
+                        _realmInitialized.value = true
+
+                        // When assignments change, update worker details
+                        updateWorkerDetails(result.data)
+                    }
+                    is Result.Error -> {
+                        _error.value = "Помилка завантаження даних: ${result.message}"
+                        Log.e(TAG, "Error loading assignments", result.exception)
+                    }
+                    is Result.Loading -> {
+                        _isLoading.value = true
+                    }
+                }
+            }
+        }
+    }
+
+    private fun observeWorkers() {
+        viewModelScope.launch {
+            workerRepository.getAll().collect { result ->
+                when (result) {
+                    is Result.Success -> {
+                        val workers = result.data
+                        // Update all workers for search
+                        _allWorkers.value = workers
+
+                        // Create a map for quick lookup
+                        val workerMap = workers.associateBy { it._id }
+                        _workerDetails.value = workerMap
+                    }
+                    is Result.Error -> {
+                        _error.value = "Помилка завантаження працівників: ${result.message}"
+                        Log.e(TAG, "Error loading workers", result.exception)
+                    }
+                    is Result.Loading -> {
+                        // We're already tracking loading state elsewhere
+                    }
+                }
+            }
+        }
+    }
+
+    private fun updateWorkerDetails(assignmentGroups: List<AssignmentGroup>) {
+        viewModelScope.launch {
             try {
-                // Используем супервизорскоп для обработки ошибок без отмены родительской корутины
-                supervisorScope {
-                    try {
-                        withTimeout(15000) { // 15 секунд таймаут
-                            _realm = app.getRealmInstance()
-                            _realm?.let { realm ->
-                                observeAssignments(realm)
-                                _realmInitialized.value = true
+                // Get all worker IDs from assignments
+                val workerIds = assignmentGroups
+                    .flatMap { it.assignments }
+                    .map { it.workerId }
+                    .distinct()
+
+                if (workerIds.isEmpty()) return@launch
+
+                // Load worker details by IDs if needed
+                if (workerIds.any { !_workerDetails.value.containsKey(it) }) {
+                    workerRepository.getWorkersByIds(workerIds).collect { result ->
+                        when (result) {
+                            is Result.Success -> {
+                                val newWorkerMap = result.data.associateBy { it._id }
+                                _workerDetails.value = newWorkerMap
+                            }
+                            is Result.Error -> {
+                                Log.e(TAG, "Error loading worker details", result.exception)
+                            }
+                            is Result.Loading -> {
+                                // We're already tracking loading state elsewhere
                             }
                         }
-                    } catch (e: TimeoutCancellationException) {
-                        _error.value = "Превышено время ожидания для подключения к базе данных"
-                        Log.e("Realm", "Realm initialization timeout: ${e.message}")
-                    } catch (e: Exception) {
-                        _error.value = "Ошибка инициализации базы данных: ${e.message}"
-                        Log.e("Realm", "Error initializing Realm: ${e.message}")
                     }
                 }
-            } finally {
-                _isLoading.value = false
+            } catch (e: Exception) {
+                Log.e(TAG, "Error updating worker details", e)
             }
         }
     }
 
-    private fun observeNetworkConnectivity() {
-        networkManager.registerNetworkCallback { isConnected ->
-            if (isConnected) {
-                viewModelScope.launch {
-                    Log.d("Network", "Connection restored, syncing data")
-                    syncUnsyncedAssignments()
-                }
-            }
-        }
-    }
-
-    private fun observeAssignments(realm: Realm) {
+    private fun observeConnectionState() {
         viewModelScope.launch {
-            realm.query<Assignment>().asFlow()
-                .catch { throwable ->
-                    Log.e("Realm", "Error in assignment flow: $throwable")
-                    _error.value = "Ошибка при получении данных: ${throwable.message}"
-                }
-                .collect { changes ->
-                    // Принудительно создаем новый список для гарантированного обновления UI
-                    val assignmentsByRow = changes.list.toList().groupBy { it.rowNumber }
-                    val groups = assignmentsByRow.map { (rowNumber, assignments) ->
-                        AssignmentGroup(rowNumber, assignments.toList())
-                    }.sortedBy { it.rowNumber }
+            assignmentRepository.getConnectionState().collect { state ->
+                _connectionState.value = state
 
-                    _assignments.value = groups
-
-                    // Проверяем статус синхронизации
-                    if (changes.list.any { !it.isSynced } && networkManager.isNetworkAvailable()) {
-                        syncUnsyncedAssignments()
-                    }
+                // If we're back online, try to sync any pending changes
+                if (state is ConnectionState.Connected) {
+                    syncPendingChanges()
                 }
+            }
         }
     }
 
-    private fun syncUnsyncedAssignments() {
+    private fun syncPendingChanges() {
         viewModelScope.launch {
-            if (!networkManager.isNetworkAvailable()) {
-                Log.d("Sync", "Network unavailable, skipping sync")
-                return@launch
+            val syncResult = assignmentRepository.syncPendingChanges()
+            if (syncResult is Result.Error) {
+                _error.value = "Помилка синхронізації: ${syncResult.message}"
+            }
+        }
+    }
+
+    /**
+     * Assign a worker to a row.
+     */
+    suspend fun assignWorkerToRow(workerId: String, rowNumber: Int): Result<Boolean> {
+        _isLoading.value = true
+
+        try {
+            val assignment = Assignment().apply {
+                this.workerId = workerId
+                this.rowNumber = rowNumber
             }
 
-            realm?.write {
-                val unsyncedAssignments = query<Assignment>("isSynced == false").find()
-                Log.d("Sync", "Found ${unsyncedAssignments.size} unsynced assignments")
-                unsyncedAssignments.forEach { assignment ->
-                    if (assignment.isDeleted) {
-                        delete(assignment)
-                        Log.d("Sync", "Deleted assignment: ${assignment._id}")
+            val result = assignmentRepository.add(assignment)
+
+            return when (result) {
+                is Result.Success -> {
+                    Log.d(TAG, "Worker assigned to row: $rowNumber")
+                    Result.Success(true)
+                }
+                is Result.Error -> {
+                    _error.value = "Помилка призначення: ${result.message}"
+                    Log.e(TAG, "Error assigning worker", result.exception)
+                    Result.Error(result.exception, result.message)
+                }
+                is Result.Loading -> Result.Loading
+            }
+        } catch (e: Exception) {
+            _error.value = "Помилка призначення: ${e.message}"
+            Log.e(TAG, "Error assigning worker", e)
+            return Result.Error(e)
+        } finally {
+            _isLoading.value = false
+        }
+    }
+
+    /**
+     * Move a worker to a different row.
+     */
+    suspend fun moveWorkerToRow(assignmentId: String, newRowNumber: Int): Result<Boolean> {
+        _isLoading.value = true
+
+        try {
+            val getResult = assignmentRepository.getById(assignmentId)
+
+            return when (getResult) {
+                is Result.Success -> {
+                    val assignment = getResult.data
+                    if (assignment != null) {
+                        assignment.rowNumber = newRowNumber
+                        val updateResult = assignmentRepository.update(assignment)
+
+                        when (updateResult) {
+                            is Result.Success -> {
+                                Log.d(TAG, "Worker moved to row: $newRowNumber")
+                                Result.Success(true)
+                            }
+                            is Result.Error -> {
+                                _error.value = "Помилка переміщення: ${updateResult.message}"
+                                Result.Error(updateResult.exception, updateResult.message)
+                            }
+                            is Result.Loading -> Result.Loading
+                        }
                     } else {
-                        assignment.isSynced = true
-                        Log.d("Sync", "Synced assignment: ${assignment._id}")
+                        _error.value = "Призначення не знайдено"
+                        Result.Success(false)
                     }
                 }
+                is Result.Error -> {
+                    _error.value = "Помилка пошуку призначення: ${getResult.message}"
+                    Result.Error(getResult.exception, getResult.message)
+                }
+                is Result.Loading -> Result.Loading
             }
+        } catch (e: Exception) {
+            _error.value = "Помилка переміщення: ${e.message}"
+            Log.e(TAG, "Error moving worker", e)
+            return Result.Error(e)
+        } finally {
+            _isLoading.value = false
         }
     }
 
-    // Предоставляем безопасный доступ к Realm
-    fun obtainRealm(): Realm? = _realm
+    /**
+     * Delete a worker assignment.
+     */
+    suspend fun deleteWorkerAssignment(assignmentId: String): Result<Boolean> {
+        _isLoading.value = true
 
-    // Безопасно выполняем операции с Realm
-    fun executeRealmOperation(operation: suspend (Realm) -> Unit) {
-        viewModelScope.launch {
-            realm?.let {
-                try {
-                    operation(it)
-                } catch (e: Exception) {
-                    Log.e("Realm", "Error executing Realm operation: ${e.message}")
-                    _error.value = "Ошибка операции с базой данных: ${e.message}"
-                }
-            } ?: run {
-                Log.e("Realm", "Realm not initialized")
-                _error.value = "База данных не инициализирована"
+        try {
+            val result = assignmentRepository.delete(assignmentId)
 
-                // Пробуем заново инициализировать Realm
-                if (!_realmInitialized.value) {
-                    initRealm()
+            return when (result) {
+                is Result.Success -> {
+                    Log.d(TAG, "Worker assignment deleted")
+                    Result.Success(true)
                 }
+                is Result.Error -> {
+                    _error.value = "Помилка видалення: ${result.message}"
+                    Log.e(TAG, "Error deleting assignment", result.exception)
+                    Result.Error(result.exception, result.message)
+                }
+                is Result.Loading -> Result.Loading
             }
+        } catch (e: Exception) {
+            _error.value = "Помилка видалення: ${e.message}"
+            Log.e(TAG, "Error deleting assignment", e)
+            return Result.Error(e)
+        } finally {
+            _isLoading.value = false
         }
+    }
+
+    /**
+     * Delete all assignments for a row.
+     */
+    suspend fun deleteRow(rowNumber: Int): Result<Boolean> {
+        _isLoading.value = true
+
+        try {
+            val result = assignmentRepository.deleteByRow(rowNumber)
+
+            return when (result) {
+                is Result.Success -> {
+                    Log.d(TAG, "Row deleted: $rowNumber")
+                    Result.Success(true)
+                }
+                is Result.Error -> {
+                    _error.value = "Помилка видалення ряду: ${result.message}"
+                    Log.e(TAG, "Error deleting row", result.exception)
+                    Result.Error(result.exception, result.message)
+                }
+                is Result.Loading -> Result.Loading
+            }
+        } catch (e: Exception) {
+            _error.value = "Помилка видалення ряду: ${e.message}"
+            Log.e(TAG, "Error deleting row", e)
+            return Result.Error(e)
+        } finally {
+            _isLoading.value = false
+        }
+    }
+
+    /**
+     * Clear any error message.
+     */
+    fun clearError() {
+        _error.value = null
     }
 
     override fun onCleared() {
         super.onCleared()
-        _realm?.close()
-        _realm = null
+        // No need to close Realm here as it's managed by the repository
     }
 }

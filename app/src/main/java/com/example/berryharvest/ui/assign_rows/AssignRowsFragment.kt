@@ -1,5 +1,6 @@
 package com.example.berryharvest.ui.assign_rows
 
+import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.os.Bundle
 import android.util.Log
@@ -11,27 +12,24 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.berryharvest.R
+import com.example.berryharvest.data.repository.ConnectionState
+import com.example.berryharvest.data.repository.Result
 import com.example.berryharvest.ui.add_worker.Worker
 import com.example.berryharvest.ui.components.SearchableSpinnerView
 import com.example.berryharvest.ui.components.WorkerSearchableItem
 import com.example.berryharvest.ui.components.toSearchableItem
-import io.realm.kotlin.Realm
-import io.realm.kotlin.ext.query
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class AssignRowsFragment : Fragment() {
-    private var realm: Realm? = null
     private val viewModel: AssignRowsViewModel by viewModels()
 
     private lateinit var rowEditText: EditText
     private lateinit var workerSearchView: SearchableSpinnerView
     private lateinit var assignButton: Button
     private lateinit var assignmentsRecyclerView: RecyclerView
-    private lateinit var assignmentAdapter: AssignmentAdapter
+    private lateinit var loadingProgressBar: ProgressBar
+    private lateinit var networkStatusTextView: TextView
 
-    private var workerList: List<Worker> = listOf()
     private var selectedWorker: Worker? = null
 
     override fun onCreateView(
@@ -39,14 +37,16 @@ class AssignRowsFragment : Fragment() {
     ): View? {
         val view = inflater.inflate(R.layout.fragment_assign_rows, container, false)
 
-        // Настройка UI компонентов
+        // Setup UI components
         rowEditText = view.findViewById(R.id.rowEditText)
         workerSearchView = view.findViewById(R.id.workerSearchView)
         assignButton = view.findViewById(R.id.assignButton)
         assignmentsRecyclerView = view.findViewById(R.id.assignmentsRecyclerView)
+        loadingProgressBar = view.findViewById(R.id.loadingProgressBar)
+        networkStatusTextView = view.findViewById(R.id.networkStatusTextView)
 
         setupUI()
-        setupWorkerSearch() // Добавлен вызов метода настройки поиска работников
+        setupWorkerSearch()
         observeViewModel()
 
         return view
@@ -57,60 +57,92 @@ class AssignRowsFragment : Fragment() {
             assignWorkerToRow()
         }
 
-        assignmentAdapter = AssignmentAdapter(
-            onMoveWorkerClick = { assignment -> showMoveWorkerDialog(assignment) },
-            onRemoveRowClick = { rowNumber -> showRemoveRowConfirmation(rowNumber) },
-            realmProvider = { viewModel.obtainRealm() }
-        )
+        // Initialize adapter with refactored approach
+        val adapter = createAssignmentAdapter()
         assignmentsRecyclerView.layoutManager = LinearLayoutManager(requireContext())
-        assignmentsRecyclerView.adapter = assignmentAdapter
+        assignmentsRecyclerView.adapter = adapter
+        assignmentAdapter = adapter
     }
 
+    private fun createAssignmentAdapter(): AssignmentAdapter {
+        return AssignmentAdapter(
+            onMoveWorkerClick = { assignment -> showMoveWorkerDialog(assignment) },
+            onRemoveRowClick = { rowNumber -> showRemoveRowConfirmation(rowNumber) }
+        )
+    }
+
+    private lateinit var assignmentAdapter: AssignmentAdapter
+
     private fun observeViewModel() {
-        // Наблюдаем за изменениями в списке назначений
+        // Observe assignments
         viewLifecycleOwner.lifecycleScope.launch {
             viewModel.assignments.collect { assignments ->
-                Log.d("AssignRows", "Получено ${assignments.size} групп назначений")
-                assignmentAdapter.submitList(ArrayList(assignments)) // Принудительно создаем новый список
+                Log.d("AssignRows", "Received ${assignments.size} assignment groups")
+                assignmentAdapter.submitList(ArrayList(assignments))
             }
         }
 
-        // Наблюдаем за ошибками
+        // Observe worker details
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.workerDetails.collect { workerMap ->
+                assignmentAdapter.updateWorkerDetails(workerMap)
+            }
+        }
+
+        // Observe errors
         viewLifecycleOwner.lifecycleScope.launch {
             viewModel.error.collect { errorMessage ->
                 errorMessage?.let {
                     Toast.makeText(requireContext(), it, Toast.LENGTH_SHORT).show()
+                    viewModel.clearError()
                 }
             }
         }
 
-        // Наблюдаем за состоянием загрузки
+        // Observe loading state
         viewLifecycleOwner.lifecycleScope.launch {
             viewModel.isLoading.collect { isLoading ->
-                // Отображаем индикатор загрузки
+                loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
+                assignButton.isEnabled = !isLoading
+            }
+        }
+
+        // Observe connection state
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.connectionState.collect { state ->
+                updateConnectionStatusUI(state)
+            }
+        }
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun updateConnectionStatusUI(state: ConnectionState) {
+        when (state) {
+            is ConnectionState.Connected -> {
+                networkStatusTextView.text = "Підключено"
+                networkStatusTextView.setTextColor(resources.getColor(android.R.color.holo_green_dark, null))
+            }
+            is ConnectionState.Disconnected -> {
+                networkStatusTextView.text = "Офлайн режим"
+                networkStatusTextView.setTextColor(resources.getColor(android.R.color.holo_orange_dark, null))
+            }
+            is ConnectionState.Error -> {
+                networkStatusTextView.text = "Помилка з'єднання"
+                networkStatusTextView.setTextColor(resources.getColor(android.R.color.holo_red_dark, null))
             }
         }
     }
 
     private fun setupWorkerSearch() {
         viewLifecycleOwner.lifecycleScope.launch {
-            // Ждем инициализации Realm
-            viewModel.realmInitialized.collect { initialized ->
-                if (initialized) {
-                    viewModel.obtainRealm()?.let { realm ->
-                        realm.query<Worker>().asFlow().collect { results ->
-                            val workers = results.list
-                            workerList = workers
-
-                            Log.d("SearchableSpinner", "Loaded ${workers.size} workers")
-                            workerSearchView.setAdapter(workers.map { it.toSearchableItem() })
-                            workerSearchView.setOnItemSelectedListener { searchableItem ->
-                                val workerItem = searchableItem as WorkerSearchableItem
-                                selectedWorker = workerItem.worker
-                                Log.d("SearchableSpinner", "Selected worker: ${workerItem.worker.fullName}")
-                            }
-                        }
-                    }
+            // Observe all workers for search
+            viewModel.allWorkers.collect { workers ->
+                Log.d("SearchableSpinner", "Loaded ${workers.size} workers")
+                workerSearchView.setAdapter(workers.map { it.toSearchableItem() })
+                workerSearchView.setOnItemSelectedListener { searchableItem ->
+                    val workerItem = searchableItem as WorkerSearchableItem
+                    selectedWorker = workerItem.worker
+                    Log.d("SearchableSpinner", "Selected worker: ${workerItem.worker.fullName}")
                 }
             }
         }
@@ -129,28 +161,28 @@ class AssignRowsFragment : Fragment() {
             val worker = selectedWorker!!
 
             viewLifecycleOwner.lifecycleScope.launch {
-                viewModel.executeRealmOperation { realm ->
-                    realm.write {
-                        val existingAssignment = query<Assignment>("workerId == $0", worker._id).first().find()
-                        if (existingAssignment != null) {
-                            existingAssignment.rowNumber = rowNumber
-                            existingAssignment.isSynced = false
-                        } else {
-                            copyToRealm(Assignment().apply {
-                                this.rowNumber = rowNumber
-                                this.workerId = worker._id
-                                this.isSynced = false
-                            })
-                        }
-                    }
+                loadingProgressBar.visibility = View.VISIBLE
+                assignButton.isEnabled = false
 
-                    withContext(Dispatchers.Main) {
+                val result = viewModel.assignWorkerToRow(worker._id, rowNumber)
+
+                when (result) {
+                    is Result.Success -> {
                         Toast.makeText(requireContext(), "Працівника призначено на ряд $rowNumber", Toast.LENGTH_SHORT).show()
                         rowEditText.text.clear()
                         workerSearchView.clearSelection()
                         selectedWorker = null
                     }
+                    is Result.Error -> {
+                        Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
+                    }
+                    is Result.Loading -> {
+                        // Already handling loading state
+                    }
                 }
+
+                loadingProgressBar.visibility = View.GONE
+                assignButton.isEnabled = true
             }
         } else {
             Toast.makeText(requireContext(), "Введіть номер рядка та виберіть працівників", Toast.LENGTH_SHORT).show()
@@ -173,18 +205,24 @@ class AssignRowsFragment : Fragment() {
             val newRowNumber = newRowText.toIntOrNull()
             if (newRowText.isNotEmpty() && newRowNumber != null && newRowNumber in 1..999) {
                 viewLifecycleOwner.lifecycleScope.launch {
-                    viewModel.executeRealmOperation { realm ->
-                        realm.write {
-                            val managedAssignment = findLatest(assignment)
-                            managedAssignment?.rowNumber = newRowNumber
-                            managedAssignment?.isSynced = false
-                        }
+                    loadingProgressBar.visibility = View.VISIBLE
 
-                        withContext(Dispatchers.Main) {
+                    val result = viewModel.moveWorkerToRow(assignment._id, newRowNumber)
+
+                    when (result) {
+                        is Result.Success -> {
                             Toast.makeText(requireContext(), "Працівник переміщений на ряд $newRowNumber", Toast.LENGTH_SHORT).show()
                             dialog.dismiss()
                         }
+                        is Result.Error -> {
+                            Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
+                        }
+                        is Result.Loading -> {
+                            // Already handling loading state
+                        }
                     }
+
+                    loadingProgressBar.visibility = View.GONE
                 }
             } else {
                 Toast.makeText(requireContext(), "Введіть корректний номер (1-999)", Toast.LENGTH_SHORT).show()
@@ -196,19 +234,28 @@ class AssignRowsFragment : Fragment() {
                 .setTitle("Вилучити працівника з ряду?")
                 .setPositiveButton("Так") { _, _ ->
                     viewLifecycleOwner.lifecycleScope.launch {
-                        viewModel.executeRealmOperation { realm ->
-                            realm.write {
-                                delete(assignment)
-                            }
-                            withContext(Dispatchers.Main) {
+                        loadingProgressBar.visibility = View.VISIBLE
+
+                        val result = viewModel.deleteWorkerAssignment(assignment._id)
+
+                        when (result) {
+                            is Result.Success -> {
                                 Toast.makeText(requireContext(), "Працівник вилучений", Toast.LENGTH_SHORT).show()
                             }
+                            is Result.Error -> {
+                                Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
+                            }
+                            is Result.Loading -> {
+                                // Already handling loading state
+                            }
                         }
+
+                        loadingProgressBar.visibility = View.GONE
                     }
+                    dialog.dismiss()
                 }
                 .setNegativeButton("Ні", null)
                 .show()
-            dialog.dismiss()
         }
 
         dialog.show()
@@ -220,25 +267,27 @@ class AssignRowsFragment : Fragment() {
             .setMessage("Ви впенені що бажаєте видалити рядок $rowNumber? Дані про назначення працівників буде видалено.")
             .setPositiveButton("Так") { _, _ ->
                 viewLifecycleOwner.lifecycleScope.launch {
-                    viewModel.executeRealmOperation { realm ->
-                        realm.write {
-                            val assignments = query<Assignment>("rowNumber == $0", rowNumber).find()
-                            delete(assignments)
-                        }
+                    loadingProgressBar.visibility = View.VISIBLE
 
-                        withContext(Dispatchers.Main) {
+                    val result = viewModel.deleteRow(rowNumber)
+
+                    when (result) {
+                        is Result.Success -> {
                             Toast.makeText(requireContext(), "Рядок $rowNumber видалено", Toast.LENGTH_SHORT).show()
                         }
+                        is Result.Error -> {
+                            Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
+                        }
+                        is Result.Loading -> {
+                            // Already handling loading state
+                        }
                     }
+
+                    loadingProgressBar.visibility = View.GONE
                 }
             }
             .setNegativeButton("Ні", null)
             .show()
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        realm?.close() // Закрываем Realm при уничтожении фрагмента
     }
 }
 

@@ -5,11 +5,29 @@
     android:orientation="vertical"
     android:padding="16dp">
 
+    <!-- Network Status Indicator -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="end"
+        android:layout_marginBottom="8dp">
+
+        <TextView
+            android:id="@+id/networkStatusTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Стан мережі"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
     <EditText
         android:id="@+id/editTextFullName"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Ім’я/Фамілія" />
+        android:hint="Ім'я/Фамілія" />
 
     <EditText
         android:id="@+id/editTextPhoneNumber"
@@ -18,11 +36,24 @@
         android:hint="Номер телефону"
         android:inputType="phone" />
 
-    <Button
-        android:id="@+id/buttonAddWorker"
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Додати працівника" />
+        android:layout_height="wrap_content">
+
+        <Button
+            android:id="@+id/buttonAddWorker"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Додати працівника" />
+
+        <ProgressBar
+            android:id="@+id/loadingProgressBar"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_gravity="center_vertical|end"
+            android:layout_marginEnd="16dp"
+            android:visibility="gone" />
+    </FrameLayout>
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerViewWorkers"

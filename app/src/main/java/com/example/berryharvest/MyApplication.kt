@@ -2,6 +2,7 @@ package com.example.berryharvest
 
 import android.app.Application
 import android.util.Log
+import com.example.berryharvest.data.repository.RepositoryProvider
 import com.example.berryharvest.ui.add_worker.Worker
 import com.example.berryharvest.ui.assign_rows.Assignment
 import com.example.berryharvest.ui.gather.Gather
@@ -19,8 +20,13 @@ class MyApplication : Application() {
     var app: App? = null
         private set
 
-    // Для кеширования инстанса Realm
+    // For caching the Realm instance
     private var realmInstance: Realm? = null
+
+    // Repository provider for accessing all repositories
+    val repositoryProvider by lazy {
+        RepositoryProvider(this)
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -29,23 +35,18 @@ class MyApplication : Application() {
     }
 
     suspend fun getRealmInstance(): Realm {
-        // Если у нас уже есть инстанс и он открыт - возвращаем его
+        // If we already have an instance that is open, return it
         realmInstance?.let {
             if (!it.isClosed()) return it
         }
 
-        val networkManager = NetworkConnectivityManager(applicationContext)
-        if (!networkManager.isNetworkAvailable()) {
-            throw IllegalStateException("Network is not available")
-        }
-
         try {
-            return withTimeout(15000) { // Таймаут 15 секунд
+            return withTimeout(15000) { // 15 second timeout
                 val app = app ?: throw IllegalStateException("App is not initialized")
                 val user = app.login(Credentials.anonymous())
                 val config = SyncConfiguration.Builder(
                     user,
-                    setOf(Worker::class, Gather::class, Assignment::class)
+                    setOf(Worker::class, Gather::class, Assignment::class, Settings::class)
                 )
                     .schemaVersion(1)
                     .compactOnLaunch()
@@ -53,6 +54,7 @@ class MyApplication : Application() {
                         add(realm.query<Worker>())
                         add(realm.query<Gather>())
                         add(realm.query<Assignment>())
+                        add(realm.query<Settings>())
                     }
                     .build()
 
@@ -66,8 +68,9 @@ class MyApplication : Application() {
         }
     }
 
-    // Закрываем Realm при завершении работы приложения
+    // Close Realm and repositories when application terminates
     override fun onTerminate() {
+        repositoryProvider.closeAll()
         realmInstance?.close()
         realmInstance = null
         super.onTerminate()

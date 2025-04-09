@@ -5,15 +5,12 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.berryharvest.MyApplication
-import com.example.berryharvest.NetworkConnectivityManager
-import io.realm.kotlin.Realm
-import io.realm.kotlin.ext.query
-import io.realm.kotlin.mongodb.subscriptions
-import io.realm.kotlin.mongodb.sync.ConnectionState
-import io.realm.kotlin.mongodb.syncSession
-import io.realm.kotlin.query.Sort
-import io.realm.kotlin.query.max
-import kotlinx.coroutines.flow.*
+import com.example.berryharvest.data.repository.ConnectionState
+import com.example.berryharvest.data.repository.Result
+import com.example.berryharvest.data.repository.WorkerRepository
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class AddWorkerViewModel(application: Application) : AndroidViewModel(application) {
@@ -21,64 +18,66 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
     private val app: MyApplication
         get() = getApplication() as MyApplication
 
-    private val networkManager = NetworkConnectivityManager(application)
-
-    private lateinit var realm: Realm
+    private val repository = app.repositoryProvider.workerRepository
 
     private val _workers = MutableStateFlow<List<Worker>>(emptyList())
     val workers: StateFlow<List<Worker>> = _workers.asStateFlow()
 
-    init {
-        initRealm()
-        observeNetworkConnectivity()
-    }
+    private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
+    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
-    private fun initRealm() {
-        viewModelScope.launch {
-            try {
-                realm = app.getRealmInstance()
-                createWorkerSubscription()
-                realm.subscriptions.waitForSynchronization()
-                observeWorkers()
-                observeWorkerChanges()
-                Log.d("AddWorkerViewModel", "Realm initialized successfully")
-            } catch (e: Exception) {
-                Log.e("Realm", "Error initializing Realm: ${e.message}")
-            }
-        }
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
+    init {
+        observeWorkers()
+        observeConnectionState()
     }
 
     private fun observeWorkers() {
         viewModelScope.launch {
-            realm.query<Worker>().asFlow()
-                .map { it.list.toList() }
-                .catch { throwable ->
-                    Log.e("Realm", "Error fetching workers: $throwable")
-                    emit(emptyList())
-                }
-                .collect { workerList ->
-                    _workers.value = workerList
-                }
-        }
-    }
+            _isLoading.value = true
+            repository.getAll().collect { result ->
+                _isLoading.value = false
 
-    private fun observeWorkerChanges() {
-        viewModelScope.launch {
-            realm.query<Worker>().asFlow().collect { changes ->
-                changes.list.forEach { worker ->
-                    if (!worker.isSynced) {
-                        checkSyncStatus(worker)
+                when (result) {
+                    is Result.Success -> {
+                        _workers.value = result.data
+                        _error.value = null
+                    }
+                    is Result.Error -> {
+                        _error.value = "Error loading workers: ${result.message}"
+                        Log.e("AddWorkerViewModel", "Error loading workers", result.exception)
+                    }
+                    is Result.Loading -> {
+                        _isLoading.value = true
                     }
                 }
             }
         }
     }
 
-    private fun observeNetworkConnectivity() {
-        networkManager.registerNetworkCallback { isConnected ->
-            if (isConnected) {
-                Log.d("Network", "Connection restored, syncing data")
-                syncUnsyncedWorkers()
+    private fun observeConnectionState() {
+        viewModelScope.launch {
+            repository.getConnectionState().collect { state ->
+                _connectionState.value = state
+
+                // If we're back online, try to sync any pending changes
+                if (state is ConnectionState.Connected) {
+                    syncPendingChanges()
+                }
+            }
+        }
+    }
+
+    private fun syncPendingChanges() {
+        viewModelScope.launch {
+            val syncResult = repository.syncPendingChanges()
+            if (syncResult is Result.Error) {
+                _error.value = "Failed to sync changes: ${syncResult.message}"
             }
         }
     }
@@ -86,43 +85,74 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
     fun addWorker(fullName: String, phoneNumber: String) {
         viewModelScope.launch {
             try {
-                val nextSequence = getNextSequenceNumber()
-                realm.write {
-                    copyToRealm(Worker().apply {
-                        this.sequenceNumber = nextSequence
-                        this.fullName = fullName
-                        this.phoneNumber = phoneNumber
-                        this.isSynced = networkManager.isNetworkAvailable()
-                    })
+                _isLoading.value = true
+                val worker = Worker().apply {
+                    this.fullName = fullName
+                    this.phoneNumber = phoneNumber
                 }
-                Log.d("Realm", "Worker added: $fullName")
+
+                val result = repository.add(worker)
+
+                when (result) {
+                    is Result.Success -> {
+                        Log.d("AddWorkerViewModel", "Worker added: $fullName with ID: ${result.data}")
+                        _error.value = null
+                    }
+                    is Result.Error -> {
+                        _error.value = "Failed to add worker: ${result.message}"
+                        Log.e("AddWorkerViewModel", "Error adding worker", result.exception)
+                    }
+                    is Result.Loading -> { /* Already handled by isLoading state */ }
+                }
+
+                _isLoading.value = false
             } catch (e: Exception) {
-                Log.e("Realm", "Error adding worker: $e")
+                _error.value = "Error adding worker: ${e.message}"
+                Log.e("AddWorkerViewModel", "Error adding worker", e)
+                _isLoading.value = false
             }
         }
-    }
-
-    private fun getNextSequenceNumber(): Int {
-        val max = realm.query<Worker>().max<Int>("sequenceNumber").find()
-        return (max ?: 0) + 1
     }
 
     fun updateWorker(id: String, fullName: String, phoneNumber: String) {
         viewModelScope.launch {
             try {
-                realm.write {
-                    val worker = query<Worker>("_id == $0", id).first().find()
-                    worker?.let {
-                        it.fullName = fullName
-                        it.phoneNumber = phoneNumber
-                        it.isSynced = networkManager.isNetworkAvailable()
+                _isLoading.value = true
+
+                // First get the worker by ID
+                val getResult = repository.getById(id)
+
+                if (getResult is Result.Success && getResult.data != null) {
+                    // Update the worker object with new values
+                    val worker = getResult.data.apply {
+                        this.fullName = fullName
+                        this.phoneNumber = phoneNumber
                     }
+
+                    // Save the updated worker
+                    val updateResult = repository.update(worker)
+
+                    when (updateResult) {
+                        is Result.Success -> {
+                            Log.d("AddWorkerViewModel", "Worker updated: $id")
+                            _error.value = null
+                        }
+                        is Result.Error -> {
+                            _error.value = "Failed to update worker: ${updateResult.message}"
+                            Log.e("AddWorkerViewModel", "Error updating worker", updateResult.exception)
+                        }
+                        is Result.Loading -> { /* Already handled by isLoading state */ }
+                    }
+                } else if (getResult is Result.Error) {
+                    _error.value = "Failed to find worker: ${getResult.message}"
+                    Log.e("AddWorkerViewModel", "Error finding worker for update", getResult.exception)
                 }
-                if (!networkManager.isNetworkAvailable()) {
-                    Log.d("Sync", "Worker updated offline. Will sync when connection is available.")
-                }
+
+                _isLoading.value = false
             } catch (e: Exception) {
-                Log.e("Realm", "Error updating worker: $e")
+                _error.value = "Error updating worker: ${e.message}"
+                Log.e("AddWorkerViewModel", "Error updating worker", e)
+                _isLoading.value = false
             }
         }
     }
@@ -130,111 +160,55 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
     fun deleteWorker(id: String) {
         viewModelScope.launch {
             try {
-                realm.write {
-                    val worker = query<Worker>("_id == $0", id).first().find()
-                    worker?.let {
-                        delete(it)
+                _isLoading.value = true
+
+                val result = repository.delete(id)
+
+                when (result) {
+                    is Result.Success -> {
+                        Log.d("AddWorkerViewModel", "Worker deleted: $id")
+                        _error.value = null
                     }
+                    is Result.Error -> {
+                        _error.value = "Failed to delete worker: ${result.message}"
+                        Log.e("AddWorkerViewModel", "Error deleting worker", result.exception)
+                    }
+                    is Result.Loading -> { /* Already handled by isLoading state */ }
                 }
-                Log.d("Sync", "Worker deleted permanently.")
+
+                _isLoading.value = false
             } catch (e: Exception) {
-                Log.e("Realm", "Error deleting worker: $e")
+                _error.value = "Error deleting worker: ${e.message}"
+                Log.e("AddWorkerViewModel", "Error deleting worker", e)
+                _isLoading.value = false
             }
         }
     }
 
-    private suspend fun resolveSequenceConflicts() {
-        realm.write {
-            val allWorkers = query<Worker>().sort("sequenceNumber", Sort.ASCENDING).find()
-            val seenNumbers = mutableSetOf<Int>()
-
-            allWorkers.forEach { worker ->
-                if (seenNumbers.contains(worker.sequenceNumber)) {
-                    // Найден дубликат - увеличиваем номер до первого свободного
-                    var newNumber = worker.sequenceNumber + 1
-                    while (seenNumbers.contains(newNumber)) {
-                        newNumber++
-                    }
-                    worker.sequenceNumber = newNumber
-                }
-                seenNumbers.add(worker.sequenceNumber)
-            }
-        }
-    }
-
-    private fun syncUnsyncedWorkers() {
-        viewModelScope.launch {
-            if (!networkManager.isNetworkAvailable()) return@launch
-
-            resolveSequenceConflicts()
-
-            realm.write {
-                val unsyncedWorkers = query<Worker>("isSynced == false").find()
-                unsyncedWorkers.forEach { worker ->
-                    worker.isSynced = true
-                }
-            }
-
-            renumberWorkersSequentially()
-        }
-    }
-
-
-    private suspend fun renumberWorkersSequentially() {
-        realm.write {
-            val workers = query<Worker>().sort("createdAt", Sort.ASCENDING).find()
-            var sequence = 1
-            workers.forEach { worker ->
-                worker.sequenceNumber = sequence++
-            }
-        }
-    }
-
-    private fun createWorkerSubscription() {
-        viewModelScope.launch {
-            realm.subscriptions.update {
-                add(realm.query<Worker>(), "WorkerSubscription")
-            }
-        }
-    }
-
-    private suspend fun waitForSubscriptionSync() {
-        realm.subscriptions.waitForSynchronization()
-    }
-
-    private fun checkSyncStatus(worker: Worker) {
+    /**
+     * Resolve any sequence number conflicts by ensuring all workers have unique sequence numbers.
+     */
+    fun resolveSequenceConflicts() {
         viewModelScope.launch {
             try {
-                if (!networkManager.isNetworkAvailable()) {
-                    Log.d("Sync", "Network unavailable, skipping sync check for worker ${worker._id}")
-                    return@launch
-                }
-
-                realm.write {
-                    val latestWorker = findLatest(worker)
-                    latestWorker?.let {
-                        val syncedWorker = realm.query<Worker>("_id == $0", it._id).first().find()
-                        val connectionState = realm.syncSession.connectionState
-                        val isConnected = connectionState == ConnectionState.CONNECTED
-                        val newSyncStatus = syncedWorker != null && isConnected
-                        it.isSynced = newSyncStatus
-                        Log.d(
-                            "Sync",
-                            "Worker ${it._id} synced status updated to: ${it.isSynced}. Network available: ${networkManager.isNetworkAvailable()}, Realm connection state: $connectionState"
-                        )
-                    }
-                }
+                (repository as? WorkerRepository)?.resolveSequenceConflicts()
             } catch (e: Exception) {
-                Log.e("Sync", "Error checking sync status: ${e.message}")
+                _error.value = "Error resolving sequence conflicts: ${e.message}"
+                Log.e("AddWorkerViewModel", "Error resolving sequence conflicts", e)
             }
         }
+    }
+
+    /**
+     * Clear any error message.
+     */
+    fun clearError() {
+        _error.value = null
     }
 
     override fun onCleared() {
         super.onCleared()
-        if (::realm.isInitialized) {
-            realm.close()
-        }
+        // No need to close Realm here as it's managed by the repository
     }
 }
 
