@@ -11,6 +11,7 @@ class Gather : RealmObject {
     var rowNumber: Int? = null
     var numOfPunnets: Int? = null
     var dateTime: String? = null
+    var punnetCost: Float? = null
     var isSynced: Boolean? = null
     var isDeleted: Boolean? = null
 }

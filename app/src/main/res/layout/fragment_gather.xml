@@ -6,6 +6,38 @@
     android:layout_height="match_parent"
     tools:context=".ui.gather.GatherFragment">
 
+    <TextView
+        android:id="@+id/punnetPriceLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_margin="16dp"
+        android:text="Ціна за пінетку"
+        android:textSize="16sp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <EditText
+        android:id="@+id/punnetPriceEditText"
+        android:layout_width="100dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:inputType="numberDecimal"
+        android:maxLength="6"
+        android:imeOptions="actionDone"
+        android:gravity="end"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/punnetPriceLabel" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="₴"
+        android:textSize="16sp"
+        android:layout_marginStart="4dp"
+        app:layout_constraintStart_toEndOf="@id/punnetPriceEditText"
+        app:layout_constraintTop_toTopOf="@id/punnetPriceEditText"
+        app:layout_constraintBottom_toBottomOf="@id/punnetPriceEditText" />
+
     <Button
         android:id="@+id/button"
         android:layout_width="220dp"

@@ -3,27 +3,44 @@ package com.example.berryharvest.ui.assign_rows
 import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.example.berryharvest.MyApplication
 import com.example.berryharvest.NetworkConnectivityManager
 import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
+import io.realm.kotlin.mongodb.subscriptions
 import io.realm.kotlin.mongodb.sync.ConnectionState
+import io.realm.kotlin.mongodb.syncSession
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import androidx.lifecycle.viewModelScope
-import io.realm.kotlin.mongodb.subscriptions
-import io.realm.kotlin.mongodb.syncSession
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withTimeout
 
 class AssignRowsViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val app: MyApplication
-        get() = getApplication() as MyApplication
-
+    private val app: MyApplication = getApplication() as MyApplication
     private val networkManager = NetworkConnectivityManager(application)
 
-    private lateinit var realm: Realm
+    private var _realm: Realm? = null
+    private val realm: Realm?
+        get() = _realm
+
+    private val _realmInitialized = MutableStateFlow(false)
+    val realmInitialized: StateFlow<Boolean> = _realmInitialized.asStateFlow()
+
+    private val _assignments = MutableStateFlow<List<AssignmentGroup>>(emptyList())
+    val assignments: StateFlow<List<AssignmentGroup>> = _assignments.asStateFlow()
+
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     init {
         initRealm()
@@ -32,13 +49,28 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
 
     private fun initRealm() {
         viewModelScope.launch {
+            _isLoading.value = true
             try {
-                realm = app.getRealmInstance()
-                createAssignmentSubscription()
-                realm.subscriptions.waitForSynchronization()
-                observeAssignmentChanges()
-            } catch (e: Exception) {
-                Log.e("Realm", "Error initializing Realm: ${e.message}")
+                // Используем супервизорскоп для обработки ошибок без отмены родительской корутины
+                supervisorScope {
+                    try {
+                        withTimeout(15000) { // 15 секунд таймаут
+                            _realm = app.getRealmInstance()
+                            _realm?.let { realm ->
+                                observeAssignments(realm)
+                                _realmInitialized.value = true
+                            }
+                        }
+                    } catch (e: TimeoutCancellationException) {
+                        _error.value = "Превышено время ожидания для подключения к базе данных"
+                        Log.e("Realm", "Realm initialization timeout: ${e.message}")
+                    } catch (e: Exception) {
+                        _error.value = "Ошибка инициализации базы данных: ${e.message}"
+                        Log.e("Realm", "Error initializing Realm: ${e.message}")
+                    }
+                }
+            } finally {
+                _isLoading.value = false
             }
         }
     }
@@ -46,23 +78,46 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
     private fun observeNetworkConnectivity() {
         networkManager.registerNetworkCallback { isConnected ->
             if (isConnected) {
-                Log.d("Network", "Connection restored, syncing data")
-                syncUnsyncedAssignments()
+                viewModelScope.launch {
+                    Log.d("Network", "Connection restored, syncing data")
+                    syncUnsyncedAssignments()
+                }
             }
         }
     }
 
-    val assignments: Flow<List<Assignment>> = realm.query<Assignment>().asFlow().map { it.list }
-        .catch { throwable -> Log.e("Realm", "Error fetching assignments: $throwable") }
+    private fun observeAssignments(realm: Realm) {
+        viewModelScope.launch {
+            realm.query<Assignment>().asFlow()
+                .catch { throwable ->
+                    Log.e("Realm", "Error in assignment flow: $throwable")
+                    _error.value = "Ошибка при получении данных: ${throwable.message}"
+                }
+                .collect { changes ->
+                    // Принудительно создаем новый список для гарантированного обновления UI
+                    val assignmentsByRow = changes.list.toList().groupBy { it.rowNumber }
+                    val groups = assignmentsByRow.map { (rowNumber, assignments) ->
+                        AssignmentGroup(rowNumber, assignments.toList())
+                    }.sortedBy { it.rowNumber }
+
+                    _assignments.value = groups
+
+                    // Проверяем статус синхронизации
+                    if (changes.list.any { !it.isSynced } && networkManager.isNetworkAvailable()) {
+                        syncUnsyncedAssignments()
+                    }
+                }
+        }
+    }
 
     private fun syncUnsyncedAssignments() {
         viewModelScope.launch {
             if (!networkManager.isNetworkAvailable()) {
-                Log.d("Sync", "Network unavailable, skipping sync of unsynced assignments")
+                Log.d("Sync", "Network unavailable, skipping sync")
                 return@launch
             }
 
-            realm.write {
+            realm?.write {
                 val unsyncedAssignments = query<Assignment>("isSynced == false").find()
                 Log.d("Sync", "Found ${unsyncedAssignments.size} unsynced assignments")
                 unsyncedAssignments.forEach { assignment ->
@@ -78,59 +133,34 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    private fun createAssignmentSubscription() {
+    // Предоставляем безопасный доступ к Realm
+    fun obtainRealm(): Realm? = _realm
+
+    // Безопасно выполняем операции с Realm
+    fun executeRealmOperation(operation: suspend (Realm) -> Unit) {
         viewModelScope.launch {
-            realm.subscriptions.update {
-                add(realm.query<Assignment>())
-            }
-        }
-    }
-
-    private suspend fun waitForSubscriptionSync() {
-        realm.subscriptions.waitForSynchronization()
-    }
-
-    private fun observeAssignmentChanges() {
-        viewModelScope.launch {
-            realm.query<Assignment>().asFlow().collect { changes ->
-                changes.list.forEach { assignment ->
-                    if (!assignment.isSynced) {
-                        checkSyncStatus(assignment)
-                    }
+            realm?.let {
+                try {
+                    operation(it)
+                } catch (e: Exception) {
+                    Log.e("Realm", "Error executing Realm operation: ${e.message}")
+                    _error.value = "Ошибка операции с базой данных: ${e.message}"
                 }
-            }
-        }
-    }
+            } ?: run {
+                Log.e("Realm", "Realm not initialized")
+                _error.value = "База данных не инициализирована"
 
-    private fun checkSyncStatus(assignment: Assignment) {
-        viewModelScope.launch {
-            try {
-                if (!networkManager.isNetworkAvailable()) {
-                    Log.d("Sync", "Network unavailable, skipping sync check for assignment ${assignment._id}")
-                    return@launch
+                // Пробуем заново инициализировать Realm
+                if (!_realmInitialized.value) {
+                    initRealm()
                 }
-
-                realm.write {
-                    val latestAssignment = findLatest(assignment)
-                    latestAssignment?.let {
-                        val syncedAssignment = realm.query<Assignment>("_id == $0", it._id).first().find()
-                        val connectionState = realm.syncSession.connectionState
-                        val isConnected = connectionState == ConnectionState.CONNECTED
-                        val newSyncStatus = syncedAssignment != null && isConnected
-                        it.isSynced = newSyncStatus
-                        Log.d("Sync", "Assignment ${it._id} synced status updated to: ${it.isSynced}")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("Sync", "Error checking sync status: ${e.message}")
             }
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-        if (::realm.isInitialized) {
-            realm.close()
-        }
+        _realm?.close()
+        _realm = null
     }
 }

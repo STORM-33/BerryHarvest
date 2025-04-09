@@ -10,7 +10,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="New Row Number:"
+        android:text="Номер нового ряду:"
         android:textSize="16sp"
         android:layout_marginBottom="8dp"/>
 
@@ -18,7 +18,7 @@
         android:id="@+id/newRowEditText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Enter new row number"
+        android:hint="Введіть номер"
         android:inputType="number"
         android:layout_marginBottom="16dp"/>
 
@@ -33,13 +33,13 @@
             android:id="@+id/moveButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Move" />
+            android:text="Перемстити" />
 
         <Button
             android:id="@+id/deleteButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Delete"
+            android:text="Вилучити"
             android:layout_marginStart="16dp"/>
 
     </LinearLayout>

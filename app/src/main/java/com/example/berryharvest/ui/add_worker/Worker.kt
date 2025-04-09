@@ -1,9 +1,7 @@
 package com.example.berryharvest.ui.add_worker
 
 import io.realm.kotlin.types.RealmObject
-import io.realm.kotlin.types.annotations.Ignore
 import io.realm.kotlin.types.annotations.PrimaryKey
-import java.util.Date
 import java.util.UUID
 
 class Worker : RealmObject {

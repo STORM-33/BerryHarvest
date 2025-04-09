@@ -1,45 +1,41 @@
 package com.example.berryharvest
 
-import android.os.Bundle
-import android.view.Menu
 import android.content.Intent
+import android.os.Bundle
 import android.util.Log
-import com.google.android.material.navigation.NavigationView
+import android.view.Menu
+import androidx.appcompat.app.AppCompatActivity
+import androidx.drawerlayout.widget.DrawerLayout
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.findNavController
 import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.navigateUp
 import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
-import androidx.drawerlayout.widget.DrawerLayout
-import androidx.appcompat.app.AppCompatActivity
 import com.example.berryharvest.databinding.ActivityMainBinding
+import com.google.android.material.navigation.NavigationView
+import com.google.android.material.snackbar.Snackbar
 import io.realm.kotlin.Realm
-import io.realm.kotlin.mongodb.App
-import io.realm.kotlin.mongodb.Credentials
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var appBarConfiguration: AppBarConfiguration
     private lateinit var binding: ActivityMainBinding
-    private lateinit var app: App
-    private lateinit var realm: Realm
+    private var realm: Realm? = null
+    private lateinit var networkManager: NetworkConnectivityManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val appID = "application-1-rgotpim"
-        app = App.create(appID)
-
-        CoroutineScope(Dispatchers.Main).launch {
-            loginUser()
-        }
-
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        networkManager = NetworkConnectivityManager(applicationContext)
+
+        // Настройка UI компонентов
         setSupportActionBar(binding.appBarMain.toolbar)
 
         val drawerLayout: DrawerLayout = binding.drawerLayout
@@ -53,20 +49,60 @@ class MainActivity : AppCompatActivity() {
         )
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
+
+        // Инициализация Realm в фоновом потоке с использованием lifecycleScope
+        initializeRealm()
     }
 
-    private suspend fun loginUser() {
-        try {
-            val user = app.login(Credentials.anonymous())
-            Log.d("REALM", "Authentication successful")
-            realm = (application as MyApplication).getRealmInstance()
-        } catch (e: Exception) {
-            Log.e("REALM", "Authentication error: ${e.message}")
+    private fun initializeRealm() {
+        // Проверка доступности сети перед инициализацией Realm
+        if (!networkManager.isNetworkAvailable()) {
+            showNetworkError()
+            // Регистрируем callback для автоматической инициализации при появлении сети
+            networkManager.registerNetworkCallback { isAvailable ->
+                if (isAvailable) {
+                    initializeRealmWithNetwork()
+                }
+            }
+            return
+        }
+
+        initializeRealmWithNetwork()
+    }
+
+    private fun initializeRealmWithNetwork() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // Получаем инстанс Realm из Application класса
+                realm = (application as MyApplication).getRealmInstance()
+
+                withContext(Dispatchers.Main) {
+                    Log.d("REALM", "Realm initialized successfully")
+                    // Можно выполнить действия, зависящие от Realm, например:
+                    // updateUIWithRealmData()
+                }
+            } catch (e: Exception) {
+                Log.e("REALM", "Realm initialization error: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    showError("Ошибка инициализации базы данных: ${e.message}")
+                }
+            }
         }
     }
 
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+    private fun showNetworkError() {
+        Snackbar.make(
+            binding.root,
+            "Нет подключения к сети. Некоторые функции могут быть недоступны.",
+            Snackbar.LENGTH_LONG
+        ).show()
+    }
 
+    private fun showError(message: String) {
+        Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG).show()
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.main, menu)
         return true
     }
@@ -82,5 +118,16 @@ class MainActivity : AppCompatActivity() {
         for (fragment in supportFragmentManager.fragments) {
             fragment.onActivityResult(requestCode, resultCode, data)
         }
+    }
+
+    // Метод для получения инстанса Realm, который могут использовать фрагменты
+    fun getRealm(): Realm? {
+        return realm
+    }
+
+    override fun onDestroy() {
+        // Закрываем Realm при уничтожении Activity
+        realm?.close()
+        super.onDestroy()
     }
 }

@@ -68,8 +68,6 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
                 changes.list.forEach { worker ->
                     if (!worker.isSynced) {
                         checkSyncStatus(worker)
-                        // Нет необходимости уведомлять наблюдателей через LiveData
-                        // StateFlow автоматически обновит список
                     }
                 }
             }
@@ -168,7 +166,7 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             if (!networkManager.isNetworkAvailable()) return@launch
 
-            resolveSequenceConflicts() // Теперь можно вызвать
+            resolveSequenceConflicts()
 
             realm.write {
                 val unsyncedWorkers = query<Worker>("isSynced == false").find()

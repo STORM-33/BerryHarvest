@@ -1,5 +1,6 @@
 package com.example.berryharvest.ui.components
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.text.Editable
 import android.text.TextWatcher
@@ -124,6 +125,7 @@ class SearchableSpinnerView @JvmOverloads constructor(
         onItemSelectedListener = listener
     }
 
+    @SuppressLint("SetTextI18n")
     fun clearSelection() {
         searchEditText.setText("")
         isSelectionMode = false
