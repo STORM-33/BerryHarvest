@@ -1,4 +1,4 @@
-package com.example.berryharvest.ui.gather
+package com.example.berryharvest.data.model
 
 import io.realm.kotlin.types.RealmObject
 import io.realm.kotlin.types.annotations.PrimaryKey

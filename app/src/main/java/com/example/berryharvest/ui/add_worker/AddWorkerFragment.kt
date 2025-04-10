@@ -13,13 +13,13 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.example.berryharvest.MyApplication
+import com.example.berryharvest.BerryHarvestApplication
 import com.example.berryharvest.R
+import com.example.berryharvest.data.model.Worker
 import com.example.berryharvest.data.repository.ConnectionState
 import io.realm.kotlin.ext.query
 import io.realm.kotlin.query.max
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -128,74 +128,78 @@ class AddWorkerFragment : Fragment() {
         val fullName = editTextFullName.text.toString().trim()
         val phoneNumber = editTextPhoneNumber.text.toString().trim()
 
-        if (fullName.isNotEmpty() && phoneNumber.isNotEmpty()) {
-            // Show loading state immediately
-            loadingProgressBar.visibility = View.VISIBLE
-            buttonAddWorker.isEnabled = false
+        if (fullName.isEmpty() || phoneNumber.isEmpty()) {
+            Toast.makeText(context, "Заповніть всі поля", Toast.LENGTH_SHORT).show()
+            return
+        }
 
-            // Store input values to clear after success
-            val savedFullName = fullName
-            val savedPhoneNumber = phoneNumber
+        // Show loading state immediately
+        loadingProgressBar.visibility = View.VISIBLE
+        buttonAddWorker.isEnabled = false
 
-            // Direct add worker operation
-            lifecycleScope.launch(Dispatchers.IO) {
-                try {
-                    Log.d(TAG, "Starting direct worker add operation")
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "Starting worker add with safe transaction")
 
-                    // Small delay to ensure UI has updated
-                    delay(100)
+                val app = requireActivity().application as BerryHarvestApplication
 
-                    // Get realm instance
-                    val app = requireActivity().application as MyApplication
-                    val realm = app.getRealmInstance()
+                // Generate a new worker with UUID
+                val workerId = UUID.randomUUID().toString()
 
-                    // Get next sequence number
-                    val maxSequence = realm.query<Worker>().max<Int>("sequenceNumber").find() ?: 0
-                    val nextSequence = maxSequence + 1
+                // Get next sequence number - do this outside transaction
+                val realm = app.getRealmInstance()
+                val maxSequence = realm.query<Worker>().max<Int>("sequenceNumber").find() ?: 0
+                val nextSequence = maxSequence + 1
 
-                    // Generate UUID here
-                    val workerId = UUID.randomUUID().toString()
+                // Check network status
+                val isNetworkAvailable = app.networkManager?.isNetworkAvailable() ?: false
+                Log.d(TAG, "Network available: $isNetworkAvailable")
 
-                    // Quick, focused transaction
-                    realm.write {
-                        copyToRealm(Worker().apply {
-                            _id = workerId
-                            sequenceNumber = nextSequence
-                            this.fullName = savedFullName
-                            this.phoneNumber = savedPhoneNumber
-                            isSynced = false
-                        })
-                    }
+                Log.d(TAG, "Using safe transaction wrapper with worker ID: $workerId, sequence: $nextSequence")
 
-                    // Update UI on main thread
-                    withContext(Dispatchers.Main) {
-                        if (isAdded) {
-                            loadingProgressBar.visibility = View.GONE
-                            buttonAddWorker.isEnabled = true
+                // Use the safe transaction wrapper
+                app.safeWriteTransaction {
+                    copyToRealm(Worker().apply {
+                        _id = workerId
+                        sequenceNumber = nextSequence
+                        this.fullName = fullName
+                        this.phoneNumber = phoneNumber
+                        // Set sync status based on network availability
+                        isSynced = isNetworkAvailable
+                    })
+                }
+
+                // Verify worker was added
+                val savedWorker = realm.query<Worker>("_id == $0", workerId).first().find()
+                Log.d(TAG, "Worker saved successfully: ${savedWorker != null}, isSynced: ${savedWorker?.isSynced}")
+
+                withContext(Dispatchers.Main) {
+                    if (isAdded) {
+                        loadingProgressBar.visibility = View.GONE
+                        buttonAddWorker.isEnabled = true
+
+                        if (savedWorker != null) {
                             Toast.makeText(context, "Працівника додано", Toast.LENGTH_SHORT).show()
 
                             // Clear input fields
                             editTextFullName.text.clear()
                             editTextPhoneNumber.text.clear()
-                        }
-                    }
-
-                    Log.d(TAG, "Worker added successfully. ID: $workerId")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error adding worker", e)
-
-                    // Update UI on main thread
-                    withContext(Dispatchers.Main) {
-                        if (isAdded) {
-                            loadingProgressBar.visibility = View.GONE
-                            buttonAddWorker.isEnabled = true
-                            Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
+                        } else {
+                            Toast.makeText(context, "Помилка: Працівника не збережено", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error adding worker", e)
+
+                withContext(Dispatchers.Main) {
+                    if (isAdded) {
+                        loadingProgressBar.visibility = View.GONE
+                        buttonAddWorker.isEnabled = true
+                        Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
             }
-        } else {
-            Toast.makeText(context, "Заповніть всі поля", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -235,7 +239,7 @@ class AddWorkerFragment : Fragment() {
                     // Direct update operation
                     lifecycleScope.launch(Dispatchers.IO) {
                         try {
-                            val app = requireActivity().application as MyApplication
+                            val app = requireActivity().application as BerryHarvestApplication
                             val realm = app.getRealmInstance()
 
                             // Store worker ID
@@ -288,7 +292,7 @@ class AddWorkerFragment : Fragment() {
                 // Direct delete operation
                 lifecycleScope.launch(Dispatchers.IO) {
                     try {
-                        val app = requireActivity().application as MyApplication
+                        val app = requireActivity().application as BerryHarvestApplication
                         val realm = app.getRealmInstance()
 
                         // Store worker ID

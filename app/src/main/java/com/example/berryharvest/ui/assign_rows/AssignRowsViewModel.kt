@@ -4,12 +4,11 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.berryharvest.MyApplication
+import com.example.berryharvest.BerryHarvestApplication
+import com.example.berryharvest.data.model.Assignment
 import com.example.berryharvest.data.repository.ConnectionState
 import com.example.berryharvest.data.repository.Result
-import com.example.berryharvest.ui.add_worker.Worker
-import io.realm.kotlin.Realm
-import io.realm.kotlin.ext.query
+import com.example.berryharvest.data.model.Worker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,7 +17,7 @@ import kotlinx.coroutines.launch
 private const val TAG = "AssignRowsViewModel"
 
 class AssignRowsViewModel(application: Application) : AndroidViewModel(application) {
-    private val app: MyApplication = getApplication() as MyApplication
+    private val app: BerryHarvestApplication = getApplication() as BerryHarvestApplication
     private val assignmentRepository = app.repositoryProvider.assignmentRepository
     private val workerRepository = app.repositoryProvider.workerRepository
 
@@ -146,6 +145,7 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
 
                 // If we're back online, try to sync any pending changes
                 if (state is ConnectionState.Connected) {
+                    Log.d(TAG, "Network is available, syncing pending changes")
                     syncPendingChanges()
                 }
             }
@@ -154,9 +154,19 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
 
     private fun syncPendingChanges() {
         viewModelScope.launch {
-            val syncResult = assignmentRepository.syncPendingChanges()
-            if (syncResult is Result.Error) {
-                _error.value = "Помилка синхронізації: ${syncResult.message}"
+            try {
+                val assignmentResult = assignmentRepository.syncPendingChanges()
+
+                // Also sync worker repository for complete data consistency
+                val workerResult = workerRepository.syncPendingChanges()
+
+                if (assignmentResult is Result.Error || workerResult is Result.Error) {
+                    _error.value = "Failed to sync some changes"
+                } else {
+                    Log.d(TAG, "Successfully synced all changes")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error syncing changes", e)
             }
         }
     }

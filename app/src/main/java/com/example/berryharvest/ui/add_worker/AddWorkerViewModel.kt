@@ -4,7 +4,8 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.berryharvest.MyApplication
+import com.example.berryharvest.BerryHarvestApplication
+import com.example.berryharvest.data.model.Worker
 import com.example.berryharvest.data.repository.ConnectionState
 import com.example.berryharvest.data.repository.Result
 import com.example.berryharvest.data.repository.WorkerRepository
@@ -15,8 +16,8 @@ import kotlinx.coroutines.launch
 
 class AddWorkerViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val app: MyApplication
-        get() = getApplication() as MyApplication
+    private val app: BerryHarvestApplication
+        get() = getApplication() as BerryHarvestApplication
 
     private val repository = app.repositoryProvider.workerRepository
 
@@ -67,6 +68,7 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
 
                 // If we're back online, try to sync any pending changes
                 if (state is ConnectionState.Connected) {
+                    Log.d("AddWorkerViewModel", "Network is available, syncing pending changes")
                     syncPendingChanges()
                 }
             }
@@ -75,9 +77,22 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun syncPendingChanges() {
         viewModelScope.launch {
-            val syncResult = repository.syncPendingChanges()
-            if (syncResult is Result.Error) {
-                _error.value = "Failed to sync changes: ${syncResult.message}"
+            try {
+                val result = repository.syncPendingChanges()
+                when (result) {
+                    is Result.Success -> {
+                        Log.d("AddWorkerViewModel", "Successfully synced changes")
+                    }
+                    is Result.Error -> {
+                        _error.value = "Failed to sync changes: ${result.message}"
+                        Log.e("AddWorkerViewModel", "Failed to sync changes", result.exception)
+                    }
+                    is Result.Loading -> {
+                        // Handle loading state if needed
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AddWorkerViewModel", "Error syncing changes", e)
             }
         }
     }

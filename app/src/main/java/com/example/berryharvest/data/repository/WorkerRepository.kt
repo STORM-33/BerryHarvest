@@ -2,14 +2,16 @@ package com.example.berryharvest.data.repository
 
 import android.app.Application
 import android.util.Log
-import com.example.berryharvest.MyApplication
+import com.example.berryharvest.BerryHarvestApplication
 import com.example.berryharvest.data.network.EnhancedNetworkManager
-import com.example.berryharvest.ui.add_worker.Worker
+import com.example.berryharvest.data.model.Worker
 import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
 import io.realm.kotlin.query.Sort
 import io.realm.kotlin.query.max
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 
 private const val TAG = "WorkerRepository"
@@ -19,7 +21,7 @@ class WorkerRepository(
     private val application: Application,
     private val networkManager: EnhancedNetworkManager
 ) : BaseRepository<Worker> {
-    private val app: MyApplication = application as MyApplication
+    private val app: BerryHarvestApplication = application as BerryHarvestApplication
     private var _realm: Realm? = null
     private val _pendingOperations = MutableStateFlow<List<PendingOperation>>(emptyList())
     val pendingOperations: StateFlow<List<PendingOperation>> = _pendingOperations.asStateFlow()
@@ -224,6 +226,18 @@ class WorkerRepository(
         return networkManager.connectionState
     }
 
+    fun startSyncWhenOnline(coroutineScope: CoroutineScope, networkManager: EnhancedNetworkManager) {
+        coroutineScope.launch {
+            this@WorkerRepository.networkManager.connectionState.collect { state ->
+                if (state is ConnectionState.Connected) {
+                    Log.d(TAG, "Network connection restored, syncing pending changes")
+                    syncPendingChanges()
+                }
+            }
+        }
+    }
+
+    // Enhance syncPendingChanges method
     override suspend fun syncPendingChanges(): Result<Boolean> {
         Log.d(TAG, "Starting syncPendingChanges operation")
         return try {
@@ -245,7 +259,7 @@ class WorkerRepository(
 
                 // Try with a timeout to avoid indefinite waiting
                 withTimeout(10000) {
-                    realm.write {
+                    app.safeWriteTransaction {
                         val unsyncedWorkers = query<Worker>("isSynced == false").find()
                         Log.d(TAG, "Processing ${unsyncedWorkers.size} unsynced workers")
 

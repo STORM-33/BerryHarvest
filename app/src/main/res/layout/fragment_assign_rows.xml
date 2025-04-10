@@ -61,7 +61,7 @@
             android:orientation="horizontal"
             android:gravity="center_vertical">
 
-            <com.example.berryharvest.ui.components.SearchableSpinnerView
+            <com.example.berryharvest.ui.common.SearchableSpinnerView
                 android:id="@+id/workerSearchView"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"/>

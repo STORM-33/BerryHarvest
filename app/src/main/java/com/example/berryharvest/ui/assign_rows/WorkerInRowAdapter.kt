@@ -6,7 +6,8 @@ import android.view.ViewGroup
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.berryharvest.R
-import com.example.berryharvest.ui.add_worker.Worker
+import com.example.berryharvest.data.model.Assignment
+import com.example.berryharvest.data.model.Worker
 import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
 

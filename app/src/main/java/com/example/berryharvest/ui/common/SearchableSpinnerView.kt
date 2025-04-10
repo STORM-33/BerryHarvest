@@ -1,4 +1,4 @@
-package com.example.berryharvest.ui.components
+package com.example.berryharvest.ui.common
 
 import android.annotation.SuppressLint
 import android.content.Context

@@ -9,7 +9,7 @@ import com.example.berryharvest.data.network.EnhancedNetworkManager
  * that only one instance of each repository is created.
  */
 class RepositoryProvider(private val application: Application) {
-    private val networkManager = EnhancedNetworkManager(application)
+    val networkManager = EnhancedNetworkManager(application)
 
     // Lazy initialization for all repositories
     val workerRepository: WorkerRepository by lazy {
@@ -20,7 +20,9 @@ class RepositoryProvider(private val application: Application) {
         AssignmentRepository(application, networkManager)
     }
 
-    // Add other repositories as needed
+    val settingsRepository: SettingsRepository by lazy {
+        SettingsRepository(application, networkManager)
+    }
 
     /**
      * Close all repositories and release resources.
@@ -29,6 +31,6 @@ class RepositoryProvider(private val application: Application) {
     fun closeAll() {
         workerRepository.close()
         assignmentRepository.close()
-        // Close other repositories as they are added
+        settingsRepository.close()
     }
 }

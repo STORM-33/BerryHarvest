@@ -5,7 +5,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.Menu
-import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.drawerlayout.widget.DrawerLayout
@@ -15,6 +14,7 @@ import androidx.navigation.ui.AppBarConfiguration
 import androidx.navigation.ui.navigateUp
 import androidx.navigation.ui.setupActionBarWithNavController
 import androidx.navigation.ui.setupWithNavController
+import com.example.berryharvest.data.repository.ConnectionState
 import com.example.berryharvest.databinding.ActivityMainBinding
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
@@ -39,7 +39,6 @@ class MainActivity : AppCompatActivity() {
 
         networkManager = NetworkConnectivityManager(applicationContext)
 
-        // Настройка UI компонентов
         setSupportActionBar(binding.appBarMain.toolbar)
 
         val drawerLayout: DrawerLayout = binding.drawerLayout
@@ -54,8 +53,9 @@ class MainActivity : AppCompatActivity() {
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
 
-        // Инициализация Realm в фоновом потоке с использованием lifecycleScope
         initializeRealm()
+        networkManager = NetworkConnectivityManager(applicationContext)
+        setupNetworkSynchronization()
     }
 
     private fun initializeRealm() {
@@ -81,11 +81,11 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 // Get Realm instance from Application class
-                realm = (application as MyApplication).getRealmInstance()
+                realm = (application as BerryHarvestApplication).getRealmInstance()
 
                 // Run diagnostics
                 val diagnostics = RealmDiagnostics.checkRealmStatus(
-                    (application as MyApplication).app,
+                    (application as BerryHarvestApplication).app,
                     realm
                 )
 
@@ -125,7 +125,47 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // And add these helper methods
+    private fun setupNetworkSynchronization() {
+        // Get repositories
+        val app = application as BerryHarvestApplication
+        val workerRepo = app.repositoryProvider.workerRepository
+        val assignmentRepo = app.repositoryProvider.assignmentRepository
+
+        // Create enhanced network manager if not already created
+        val networkManager = app.repositoryProvider.networkManager
+
+        // Start observing network changes and sync when needed
+        lifecycleScope.launch {
+            networkManager.connectionState.collect { state ->
+                if (state is ConnectionState.Connected) {
+                    Log.d("MainActivity", "Network connected, initiating sync")
+                    try {
+                        workerRepo.syncPendingChanges()
+                        assignmentRepo.syncPendingChanges()
+                    } catch (e: Exception) {
+                        Log.e("MainActivity", "Error syncing data", e)
+                    }
+                }
+            }
+        }
+
+        // Start repositories' own sync mechanisms
+        workerRepo.startSyncWhenOnline(lifecycleScope, networkManager)
+        assignmentRepo.startSyncWhenOnline(lifecycleScope, networkManager)
+    }
+
+    // Helper method to update UI based on connection state
+    private fun updateNetworkStatusUI(state: ConnectionState) {
+        runOnUiThread {
+            // Example: Update a status TextView or indicator
+            // networkStatusTextView.text = when(state) {
+            //     is ConnectionState.Connected -> "Online"
+            //     is ConnectionState.Disconnected -> "Offline"
+            //     is ConnectionState.Error -> "Error: ${state.message}"
+            // }
+        }
+    }
+
     private fun showProgressDialog(message: String) {
         if (progressDialog == null) {
             val dialogView = layoutInflater.inflate(R.layout.dialog_progress, null)
@@ -151,10 +191,10 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 // Force offline mode in application
-                (application as MyApplication).forceOfflineMode = true
+                (application as BerryHarvestApplication).forceOfflineMode = true
 
                 // Try to get offline Realm instance
-                realm = (application as MyApplication).getRealmInstance()
+                realm = (application as BerryHarvestApplication).getRealmInstance()
 
                 withContext(Dispatchers.Main) {
                     hideProgressDialog()
@@ -188,6 +228,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.main, menu)
+        menu.add("Test Database").apply {
+            setOnMenuItemClickListener {
+                true
+            }
+        }
         return true
     }
 
@@ -204,15 +249,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Метод для получения инстанса Realm, который могут использовать фрагменты
     fun getRealm(): Realm? {
         return realm
     }
 
     override fun onDestroy() {
-        // Закрываем Realm при уничтожении Activity
         realm?.close()
         super.onDestroy()
     }
+
 }
 

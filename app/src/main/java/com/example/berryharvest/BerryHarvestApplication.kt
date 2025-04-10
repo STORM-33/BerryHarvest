@@ -3,10 +3,11 @@ package com.example.berryharvest
 import android.app.Application
 import android.util.Log
 import com.example.berryharvest.data.repository.RepositoryProvider
-import com.example.berryharvest.ui.add_worker.Worker
-import com.example.berryharvest.ui.assign_rows.Assignment
-import com.example.berryharvest.ui.gather.Gather
-import com.example.berryharvest.ui.gather.Settings
+import com.example.berryharvest.data.model.Worker
+import com.example.berryharvest.data.model.Assignment
+import com.example.berryharvest.data.model.Gather
+import com.example.berryharvest.data.model.Settings
+import io.realm.kotlin.MutableRealm
 import io.realm.kotlin.Realm
 import io.realm.kotlin.RealmConfiguration
 import io.realm.kotlin.ext.query
@@ -18,7 +19,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlin.time.Duration.Companion.seconds
 
-class MyApplication : Application() {
+class BerryHarvestApplication : Application() {
     var app: App? = null
         private set
 
@@ -46,7 +47,10 @@ class MyApplication : Application() {
     suspend fun getRealmInstance(): Realm {
         // If we already have an instance that is open, return it
         realmInstance?.let {
-            if (!it.isClosed()) return it
+            if (!it.isClosed()) {
+                Log.d("Realm", "Returning existing Realm instance")
+                return it
+            }
         }
 
         Log.d("Realm", "Creating new Realm instance")
@@ -54,14 +58,20 @@ class MyApplication : Application() {
         try {
             return withTimeout(15000) { // 15 second timeout
                 val app = app ?: throw IllegalStateException("App is not initialized")
+                Log.d("Realm", "App reference obtained: ${app.configuration.appId}")
+
+                // Log network status
+                val networkAvailable = networkManager?.isNetworkAvailable() ?: false
+                Log.d("Realm", "Network available: $networkAvailable")
 
                 // If network is not available, create local-only Realm to prevent sync issues
-                if (networkManager?.isNetworkAvailable() == false) {
+                if (forceOfflineMode || networkManager?.isNetworkAvailable() == false) {
                     Log.d("Realm", "Network unavailable, creating local Realm")
                     val config = RealmConfiguration.Builder(
                         setOf(Worker::class, Gather::class, Assignment::class, Settings::class)
                     )
                         .schemaVersion(1)
+                        .directory("local_realm")
                         .build()
 
                     return@withTimeout Realm.open(config).also {
@@ -78,7 +88,6 @@ class MyApplication : Application() {
                     Log.e("Realm", "Login failed: ${e.message}")
                     throw e
                 }
-
                 Log.d("Realm", "Login successful, configuring sync")
 
                 // Configure sync and keep it simple
@@ -113,6 +122,7 @@ class MyApplication : Application() {
                         setOf(Worker::class, Gather::class, Assignment::class, Settings::class)
                     )
                         .schemaVersion(1)
+                        .directory("local_fallback")
                         .build()
 
                     Realm.open(localConfig).also {
@@ -145,11 +155,55 @@ class MyApplication : Application() {
         }
     }
 
+    suspend fun <T> safeWriteTransaction(block: MutableRealm.() -> T): T {
+        val realm = runBlocking { getRealmInstance() }
+        return try {
+            Log.d("Realm", "Starting safe write transaction")
+            val result = realm.write(block)
+            Log.d("Realm", "Write transaction completed successfully")
+            result
+        } catch (e: IllegalStateException) {
+            if (e.message?.contains("wrong transaction state", ignoreCase = true) == true) {
+                Log.w("Realm", "Transaction state error - recreating Realm instance")
+
+                // Close potentially problematic instance
+                try {
+                    realm.close()
+                } catch (closeEx: Exception) {
+                    Log.e("Realm", "Error closing problematic Realm", closeEx)
+                }
+
+                // Clear the cached instance
+                realmInstance = null
+
+                // Create fresh instance and retry
+                val freshRealm = runBlocking { getRealmInstance() }
+                Log.d("Realm", "Retrying transaction with fresh Realm instance")
+                freshRealm.write(block)
+            } else {
+                throw e
+            }
+        }
+    }
+
     // Close Realm and repositories when application terminates
     override fun onTerminate() {
         repositoryProvider.closeAll()
         realmInstance?.close()
         realmInstance = null
         super.onTerminate()
+    }
+
+    // Clean up resources when memory is low
+    override fun onLowMemory() {
+        super.onLowMemory()
+
+        // If we're low on memory, we can close the realm instance
+        // to free up resources, it'll be recreated when needed
+        if (realmInstance != null && !realmInstance!!.isClosed()) {
+            Log.d("Realm", "Closing Realm due to low memory")
+            realmInstance?.close()
+            realmInstance = null
+        }
     }
 }

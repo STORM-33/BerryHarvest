@@ -2,13 +2,15 @@ package com.example.berryharvest.data.repository
 
 import android.app.Application
 import android.util.Log
-import com.example.berryharvest.MyApplication
+import com.example.berryharvest.BerryHarvestApplication
 import com.example.berryharvest.data.network.EnhancedNetworkManager
-import com.example.berryharvest.ui.assign_rows.Assignment
+import com.example.berryharvest.data.model.Assignment
 import com.example.berryharvest.ui.assign_rows.AssignmentGroup
 import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 
 private const val TAG = "AssignmentRepository"
@@ -19,7 +21,7 @@ class AssignmentRepository(
     private val networkManager: EnhancedNetworkManager
 ) : BaseRepository<Assignment> {
 
-    private val app: MyApplication = application as MyApplication
+    private val app: BerryHarvestApplication = application as BerryHarvestApplication
     private var _realm: Realm? = null
     private val _pendingOperations = MutableStateFlow<List<PendingOperation>>(emptyList())
     val pendingOperations: StateFlow<List<PendingOperation>> = _pendingOperations.asStateFlow()
@@ -272,6 +274,18 @@ class AssignmentRepository(
         return networkManager.connectionState
     }
 
+    fun startSyncWhenOnline(coroutineScope: CoroutineScope, networkManager: EnhancedNetworkManager) {
+        coroutineScope.launch {
+            this@AssignmentRepository.networkManager.connectionState.collect { state ->
+                if (state is ConnectionState.Connected) {
+                    Log.d(TAG, "Network connection restored, syncing pending changes")
+                    syncPendingChanges()
+                }
+            }
+        }
+    }
+
+    // Enhance syncPendingChanges method
     override suspend fun syncPendingChanges(): Result<Boolean> {
         Log.d(TAG, "Starting syncPendingChanges operation")
         return try {
@@ -293,7 +307,7 @@ class AssignmentRepository(
 
                 // Try with a timeout to avoid indefinite waiting
                 withTimeout(10000) {
-                    realm.write {
+                    app.safeWriteTransaction {
                         val unsyncedAssignments = query<Assignment>("isSynced == false").find()
                         Log.d(TAG, "Processing ${unsyncedAssignments.size} unsynced assignments")
 

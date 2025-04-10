@@ -1,4 +1,4 @@
-package com.example.berryharvest.ui.components
+package com.example.berryharvest.ui.common
 
 interface SearchableItem {
     fun getDisplayText(): String

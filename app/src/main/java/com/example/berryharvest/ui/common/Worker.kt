@@ -1,6 +1,6 @@
-package com.example.berryharvest.ui.components
+package com.example.berryharvest.ui.common
 
-import com.example.berryharvest.ui.add_worker.Worker
+import com.example.berryharvest.data.model.Worker
 
 fun Worker.toSearchableItem(): WorkerSearchableItem {
     return WorkerSearchableItem(this)

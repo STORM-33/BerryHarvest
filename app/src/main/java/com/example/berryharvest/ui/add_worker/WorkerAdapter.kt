@@ -11,6 +11,7 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.example.berryharvest.R
+import com.example.berryharvest.data.model.Worker
 
 class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) :
     ListAdapter<Worker, WorkerAdapter.WorkerViewHolder>(WorkerDiffCallback()) {

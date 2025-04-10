@@ -2,7 +2,7 @@
 package com.example.berryharvest
 
 import android.util.Log
-import com.example.berryharvest.ui.add_worker.Worker
+import com.example.berryharvest.data.model.Worker
 import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
 import io.realm.kotlin.mongodb.App
