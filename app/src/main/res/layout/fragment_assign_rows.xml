@@ -6,30 +6,19 @@
     android:layout_height="match_parent"
     android:padding="16dp">
 
-    <!-- Network Status Indicator -->
-    <TextView
-        android:id="@+id/networkStatusTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Стан мережі"
-        android:textSize="14sp"
-        android:textStyle="bold"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <!-- Assignment Interface -->
+    <!-- Верхняя часть: ввод данных и основные кнопки -->
     <LinearLayout
         android:id="@+id/assignWorkerLayout"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:gravity="start"
-        app:layout_constraintTop_toBottomOf="@id/networkStatusTextView"
+        android:layout_marginTop="8dp"
+        app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:layout_marginTop="8dp">
+        app:layout_constraintEnd_toEndOf="parent">
 
-        <!-- Row Selection -->
+        <!-- Ряд: метка и ввод номера ряда -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -51,26 +40,19 @@
                 android:inputType="number"
                 android:maxLength="3"
                 android:layout_marginEnd="16dp" />
-
         </LinearLayout>
 
-        <!-- Worker Selection -->
-        <LinearLayout
+        <!-- Выбор работника через спиннер -->
+        <com.example.berryharvest.ui.common.SearchableSpinnerView
+            android:id="@+id/workerSearchView"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:layout_height="wrap_content" />
 
-            <com.example.berryharvest.ui.common.SearchableSpinnerView
-                android:id="@+id/workerSearchView"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"/>
-
-        </LinearLayout>
-
+        <!-- Кнопка "Призначити" (с накладывающимся ProgressBar) -->
         <FrameLayout
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content">
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp">
 
             <Button
                 android:id="@+id/assignButton"
@@ -85,9 +67,10 @@
                 android:layout_gravity="center"
                 android:visibility="gone" />
         </FrameLayout>
+
     </LinearLayout>
 
-    <!-- Assignments List -->
+    <!-- Список назначений (например, список рядов) -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/assignmentsRecyclerView"
         android:layout_width="0dp"
@@ -96,7 +79,22 @@
         app:layout_constraintTop_toBottomOf="@id/assignWorkerLayout"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent" />
+        app:layout_constraintBottom_toTopOf="@id/clearAllRowsButton" />
+
+    <!-- Кнопка удаления внизу страницы, на всю ширину -->
+    <Button
+        android:id="@+id/clearAllRowsButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Видалити всі ряди"
+        android:backgroundTint="#F44336"
+        android:textColor="#FFFFFF"
+        android:layout_marginTop="8dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
+
+
 

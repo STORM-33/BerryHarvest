@@ -33,7 +33,6 @@ class AddWorkerFragment : Fragment() {
     private lateinit var buttonAddWorker: Button
     private lateinit var recyclerViewWorkers: RecyclerView
     private lateinit var loadingProgressBar: ProgressBar
-    private lateinit var networkStatusTextView: TextView
     private lateinit var workerAdapter: WorkerAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,7 +52,6 @@ class AddWorkerFragment : Fragment() {
         buttonAddWorker = view.findViewById(R.id.buttonAddWorker)
         recyclerViewWorkers = view.findViewById(R.id.recyclerViewWorkers)
         loadingProgressBar = view.findViewById(R.id.loadingProgressBar)
-        networkStatusTextView = view.findViewById(R.id.networkStatusTextView)
 
         // Setup RecyclerView
         workerAdapter = WorkerAdapter { worker ->
@@ -97,31 +95,6 @@ class AddWorkerFragment : Fragment() {
                 }
             }
         }
-
-        // Observe connection state
-        lifecycleScope.launch {
-            viewModel.connectionState.collect { state ->
-                updateConnectionStatusUI(state)
-            }
-        }
-    }
-
-    @SuppressLint("SetTextI18n")
-    private fun updateConnectionStatusUI(state: ConnectionState) {
-        when (state) {
-            is ConnectionState.Connected -> {
-                networkStatusTextView.text = "Підключено"
-                networkStatusTextView.setTextColor(resources.getColor(android.R.color.holo_green_dark, null))
-            }
-            is ConnectionState.Disconnected -> {
-                networkStatusTextView.text = "Офлайн режим"
-                networkStatusTextView.setTextColor(resources.getColor(android.R.color.holo_orange_dark, null))
-            }
-            is ConnectionState.Error -> {
-                networkStatusTextView.text = "Помилка з'єднання"
-                networkStatusTextView.setTextColor(resources.getColor(android.R.color.holo_red_dark, null))
-            }
-        }
     }
 
     private fun addWorker() {
@@ -152,7 +125,7 @@ class AddWorkerFragment : Fragment() {
                 val nextSequence = maxSequence + 1
 
                 // Check network status
-                val isNetworkAvailable = app.networkManager?.isNetworkAvailable() ?: false
+                val isNetworkAvailable = app.networkStatusManager.isNetworkAvailable()
                 Log.d(TAG, "Network available: $isNetworkAvailable")
 
                 Log.d(TAG, "Using safe transaction wrapper with worker ID: $workerId, sequence: $nextSequence")

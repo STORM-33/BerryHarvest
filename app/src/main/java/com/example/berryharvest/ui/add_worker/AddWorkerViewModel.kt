@@ -20,6 +20,7 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
         get() = getApplication() as BerryHarvestApplication
 
     private val repository = app.repositoryProvider.workerRepository
+    private val networkStatusManager = app.networkStatusManager
 
     private val _workers = MutableStateFlow<List<Worker>>(emptyList())
     val workers: StateFlow<List<Worker>> = _workers.asStateFlow()
@@ -63,7 +64,8 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun observeConnectionState() {
         viewModelScope.launch {
-            repository.getConnectionState().collect { state ->
+            // Use the centralized network status manager instead of repository
+            networkStatusManager.connectionState.collect { state ->
                 _connectionState.value = state
 
                 // If we're back online, try to sync any pending changes
@@ -76,21 +78,10 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun syncPendingChanges() {
+        // Use the global sync manager instead
         viewModelScope.launch {
             try {
-                val result = repository.syncPendingChanges()
-                when (result) {
-                    is Result.Success -> {
-                        Log.d("AddWorkerViewModel", "Successfully synced changes")
-                    }
-                    is Result.Error -> {
-                        _error.value = "Failed to sync changes: ${result.message}"
-                        Log.e("AddWorkerViewModel", "Failed to sync changes", result.exception)
-                    }
-                    is Result.Loading -> {
-                        // Handle loading state if needed
-                    }
-                }
+                app.syncManager.performSync(silent = true)
             } catch (e: Exception) {
                 Log.e("AddWorkerViewModel", "Error syncing changes", e)
             }

@@ -5,10 +5,12 @@ import android.util.Log
 import com.example.berryharvest.BerryHarvestApplication
 import com.example.berryharvest.data.network.EnhancedNetworkManager
 import com.example.berryharvest.data.model.Settings
+import io.realm.kotlin.MutableRealm
 import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withTimeout
+import kotlin.time.Duration.Companion.seconds
 
 private const val TAG = "SettingsRepository"
 private const val ENTITY_TYPE = "settings"
@@ -304,6 +306,21 @@ class SettingsRepository(
         currentOperations.add(operation)
         _pendingOperations.value = currentOperations
         Log.d(TAG, "Added pending operation: $operation")
+    }
+
+    override fun hasPendingOperations(): Boolean {
+        return _pendingOperations.value.isNotEmpty()
+    }
+
+    override fun getPendingOperationsCount(): Int {
+        return _pendingOperations.value.size
+    }
+
+    override suspend fun <R> safeWriteWithTimeout(block: MutableRealm.() -> R): R {
+        val app = application as BerryHarvestApplication
+        return withTimeout(5.seconds) {
+            app.safeWriteTransaction(block)
+        }
     }
 
     override fun close() {

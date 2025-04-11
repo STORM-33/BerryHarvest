@@ -9,6 +9,7 @@ import com.example.berryharvest.data.model.Assignment
 import com.example.berryharvest.data.repository.ConnectionState
 import com.example.berryharvest.data.repository.Result
 import com.example.berryharvest.data.model.Worker
+import io.realm.kotlin.ext.query
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,6 +21,7 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
     private val app: BerryHarvestApplication = getApplication() as BerryHarvestApplication
     private val assignmentRepository = app.repositoryProvider.assignmentRepository
     private val workerRepository = app.repositoryProvider.workerRepository
+    private val networkStatusManager = app.networkStatusManager
 
     private val _assignments = MutableStateFlow<List<AssignmentGroup>>(emptyList())
     val assignments: StateFlow<List<AssignmentGroup>> = _assignments.asStateFlow()
@@ -55,26 +57,57 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             _isLoading.value = true
 
-            assignmentRepository.getAllGroupedByRow().collect { result ->
-                _isLoading.value = false
+            // Make sure to launch a new coroutine that won't be cancelled if there's an error
+            try {
+                assignmentRepository.getAllGroupedByRow().collect { result ->
+                    _isLoading.value = false
 
-                when (result) {
-                    is Result.Success -> {
-                        _assignments.value = result.data
-                        _error.value = null
-                        _realmInitialized.value = true
+                    when (result) {
+                        is Result.Success -> {
+                            Log.d(TAG, "Successfully loaded ${result.data.size} assignment groups")
+                            _assignments.value = result.data
+                            _error.value = null
+                            _realmInitialized.value = true
 
-                        // When assignments change, update worker details
-                        updateWorkerDetails(result.data)
-                    }
-                    is Result.Error -> {
-                        _error.value = "Помилка завантаження даних: ${result.message}"
-                        Log.e(TAG, "Error loading assignments", result.exception)
-                    }
-                    is Result.Loading -> {
-                        _isLoading.value = true
+                            // When assignments change, update worker details
+                            updateWorkerDetails(result.data)
+                        }
+                        is Result.Error -> {
+                            Log.e(TAG, "Error loading assignments", result.exception)
+                            _error.value = "Помилка завантаження даних: ${result.message}"
+
+                            // Even if there's an error, try to load any local data we might have
+                            // This ensures we show something in offline mode
+                            try {
+                                val realm = (getApplication() as BerryHarvestApplication).getRealmInstance()
+                                val localAssignments = realm.query<Assignment>().find()
+
+                                // Group them manually
+                                val groupedAssignments = localAssignments
+                                    .groupBy { it.rowNumber }
+                                    .map { (rowNumber, assignments) ->
+                                        AssignmentGroup(rowNumber, assignments.toList())
+                                    }
+                                    .sortedBy { it.rowNumber }
+
+                                if (groupedAssignments.isNotEmpty()) {
+                                    Log.d(TAG, "Loaded ${groupedAssignments.size} assignment groups from local database")
+                                    _assignments.value = groupedAssignments
+                                    updateWorkerDetails(groupedAssignments)
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error loading fallback local data", e)
+                            }
+                        }
+                        is Result.Loading -> {
+                            _isLoading.value = true
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Unexpected error observing assignments", e)
+                _isLoading.value = false
+                _error.value = "Помилка: ${e.message}"
             }
         }
     }
@@ -100,6 +133,43 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
                         // We're already tracking loading state elsewhere
                     }
                 }
+            }
+        }
+    }
+
+    fun loadInitialData() {
+        viewModelScope.launch {
+            try {
+                _isLoading.value = true
+
+                // Get direct reference to Realm
+                val app = getApplication() as BerryHarvestApplication
+                val realm = app.getRealmInstance()
+
+                // Load assignments directly
+                val assignments = realm.query<Assignment>().find()
+
+                // Group them manually
+                val groupedAssignments = assignments
+                    .groupBy { it.rowNumber }
+                    .map { (rowNumber, assignments) ->
+                        AssignmentGroup(rowNumber, assignments.toList())
+                    }
+                    .sortedBy { it.rowNumber }
+
+                if (groupedAssignments.isNotEmpty()) {
+                    Log.d(TAG, "Directly loaded ${groupedAssignments.size} assignment groups")
+                    _assignments.value = groupedAssignments
+
+                    // Also update worker details
+                    updateWorkerDetails(groupedAssignments)
+                }
+
+                _isLoading.value = false
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in loadInitialData", e)
+                _isLoading.value = false
+                _error.value = "Помилка завантаження даних: ${e.message}"
             }
         }
     }
@@ -138,9 +208,42 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    suspend fun deleteAllRows(): Result<Boolean> {
+        _isLoading.value = true
+
+        return try {
+            val app = getApplication() as BerryHarvestApplication
+            val realm = app.getRealmInstance()
+
+            // Find all assignments
+            val assignments = realm.query<Assignment>().find()
+
+            if (assignments.isEmpty()) {
+                _isLoading.value = false
+                return Result.Success(true)
+            }
+
+            // Delete all assignments
+            app.safeWriteTransaction {
+                val liveAssignments = query<Assignment>().find()
+                delete(liveAssignments)
+                Log.d(TAG, "Deleted all assignments (${liveAssignments.size})")
+            }
+
+            _isLoading.value = false
+            Result.Success(true)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error deleting all rows", e)
+            _isLoading.value = false
+            _error.value = "Помилка видалення всіх рядів: ${e.message}"
+            Result.Error(e)
+        }
+    }
+
     private fun observeConnectionState() {
         viewModelScope.launch {
-            assignmentRepository.getConnectionState().collect { state ->
+            // Use the centralized network status manager
+            networkStatusManager.connectionState.collect { state ->
                 _connectionState.value = state
 
                 // If we're back online, try to sync any pending changes
@@ -155,16 +258,8 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
     private fun syncPendingChanges() {
         viewModelScope.launch {
             try {
-                val assignmentResult = assignmentRepository.syncPendingChanges()
-
-                // Also sync worker repository for complete data consistency
-                val workerResult = workerRepository.syncPendingChanges()
-
-                if (assignmentResult is Result.Error || workerResult is Result.Error) {
-                    _error.value = "Failed to sync some changes"
-                } else {
-                    Log.d(TAG, "Successfully synced all changes")
-                }
+                // Use the global sync manager
+                app.syncManager.performSync(silent = true)
             } catch (e: Exception) {
                 Log.e(TAG, "Error syncing changes", e)
             }

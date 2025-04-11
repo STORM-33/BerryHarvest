@@ -1,6 +1,7 @@
 package com.example.berryharvest.ui.assign_rows
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
@@ -29,6 +30,15 @@ class AssignmentAdapter(
         val workerRecyclerView: RecyclerView = view.findViewById(R.id.workerRecyclerView)
         val removeRowButton: Button = view.findViewById(R.id.removeRowButton)
         val container: View = view.findViewById(R.id.assignmentContainer)
+
+        fun showDeleteRowDialog(rowNumber: Int) {
+            AlertDialog.Builder(itemView.context)
+                .setTitle("Видалити ряд")
+                .setMessage("Ви впевнені, що бажаєте видалити ряд $rowNumber?")
+                .setPositiveButton("Так") { _, _ -> onRemoveRowClick(rowNumber) }
+                .setNegativeButton("Ні", null)
+                .show()
+        }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): AssignmentViewHolder {
@@ -43,9 +53,10 @@ class AssignmentAdapter(
         val rowNumber = assignmentGroup.rowNumber
         val assignments = assignmentGroup.assignments
 
+        // Remove sync indicator from text and use more subtle approach
         holder.rowNumberTextView.text = "Ряд $rowNumber"
 
-        // Set up inner RecyclerView with the new adapter
+        // Set up inner RecyclerView with the worker adapter
         val workerAdapter = RefactoredWorkerInRowAdapter(
             assignments,
             workerDetailsMap,
@@ -54,21 +65,27 @@ class AssignmentAdapter(
         holder.workerRecyclerView.layoutManager = LinearLayoutManager(holder.itemView.context)
         holder.workerRecyclerView.adapter = workerAdapter
 
-        // Check sync status - if there are any unsynced assignments
+        // Set background color based on sync status - make it more subtle
         val hasUnsyncedAssignments = assignments.any { !it.isSynced }
-
-        // Set background color based on sync status
         if (hasUnsyncedAssignments) {
-            holder.container.setBackgroundColor(Color.parseColor("#FFCDD2")) // Light red
+            holder.container.setBackgroundColor(Color.parseColor("#15FFC107")) // Very light amber with 10% opacity
+            // Add a small sync icon
+            holder.rowNumberTextView.setCompoundDrawablesWithIntrinsicBounds(0, 0, R.drawable.ic_sync_small, 0)
             Log.d("AssignmentAdapter", "Row $rowNumber is UNSYNCED")
         } else {
             holder.container.setBackgroundColor(Color.TRANSPARENT)
+            holder.rowNumberTextView.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
             Log.d("AssignmentAdapter", "Row $rowNumber is SYNCED")
         }
 
-        holder.removeRowButton.setOnClickListener {
-            onRemoveRowClick(rowNumber)
+        // Long click to delete row
+        holder.rowNumberTextView.setOnLongClickListener {
+            holder.showDeleteRowDialog(rowNumber)
+            true
         }
+
+        // Hide the remove row button
+        holder.removeRowButton.visibility = View.GONE
     }
 
     /**

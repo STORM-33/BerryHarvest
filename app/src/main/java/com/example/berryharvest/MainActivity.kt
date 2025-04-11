@@ -1,10 +1,13 @@
 package com.example.berryharvest
 
+import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.Menu
+import android.view.MenuItem
+import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.drawerlayout.widget.DrawerLayout
@@ -29,7 +32,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var appBarConfiguration: AppBarConfiguration
     private lateinit var binding: ActivityMainBinding
     private var realm: Realm? = null
-    private lateinit var networkManager: NetworkConnectivityManager
+    private lateinit var networkStatusIndicator: TextView
+    private lateinit var offlineBanner: TextView
+    private var syncSnackbar: Snackbar? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,13 +42,14 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        networkManager = NetworkConnectivityManager(applicationContext)
-
         setSupportActionBar(binding.appBarMain.toolbar)
 
         val drawerLayout: DrawerLayout = binding.drawerLayout
         val navView: NavigationView = binding.navView
         val navController = findNavController(R.id.nav_host_fragment_content_main)
+
+        // Set up offline banner using the binding properly
+        offlineBanner = binding.appBarMain.offlineBanner
 
         appBarConfiguration = AppBarConfiguration(
             setOf(
@@ -54,28 +60,60 @@ class MainActivity : AppCompatActivity() {
         navView.setupWithNavController(navController)
 
         initializeRealm()
-        networkManager = NetworkConnectivityManager(applicationContext)
+        setupNetworkStatusIndicator()
         setupNetworkSynchronization()
     }
 
-    private fun initializeRealm() {
-        // Check network availability before initializing Realm
-        if (!networkManager.isNetworkAvailable()) {
-            showNetworkError()
-            // Register callback for automatic initialization when network becomes available
-            networkManager.registerNetworkCallback { isAvailable ->
-                if (isAvailable) {
-                    initializeRealmWithNetwork()
-                }
-            }
-            return
-        }
+    private fun setupNetworkStatusIndicator() {
+        val networkStatusManager = (application as BerryHarvestApplication).networkStatusManager
 
-        initializeRealmWithNetwork()
+        // Observe connection state changes
+        lifecycleScope.launch {
+            networkStatusManager.connectionState.collect { state ->
+                updateNetworkStatusUI(state)
+            }
+        }
     }
 
-    private fun initializeRealmWithNetwork() {
-        // Show a progress dialog instead of relying on a view that doesn't exist
+    private fun updateNetworkStatusUI(state: ConnectionState) {
+        runOnUiThread {
+            when (state) {
+                is ConnectionState.Connected -> {
+                    // Hide offline banner when connected
+                    offlineBanner.visibility = View.GONE
+
+                    // Check if we have pending changes to sync
+                    val app = application as BerryHarvestApplication
+                    if (app.syncManager.hasPendingChanges()) {
+                        showSyncNotification()
+                    }
+                }
+                is ConnectionState.Disconnected -> {
+                    // Show offline banner when disconnected
+                    offlineBanner.visibility = View.VISIBLE
+                }
+                is ConnectionState.Error -> {
+                    // Show offline banner with error state
+                    offlineBanner.visibility = View.VISIBLE
+                }
+            }
+        }
+    }
+
+    private fun showSyncNotification() {
+        val snackbar = Snackbar.make(
+            binding.root,
+            "Несинхронізовані зміни доступні для синхронізації",
+            Snackbar.LENGTH_LONG
+        )
+        snackbar.setAction("Синхронізувати") {
+            showSyncingSnackbar()
+        }
+        snackbar.show()
+    }
+
+    private fun initializeRealm() {
+        // Show a progress dialog
         showProgressDialog("Connecting to database...")
 
         lifecycleScope.launch(Dispatchers.IO) {
@@ -114,7 +152,7 @@ class MainActivity : AppCompatActivity() {
                     AlertDialog.Builder(this@MainActivity)
                         .setTitle("Connection Error")
                         .setMessage("$errorMessage\n\nWould you like to retry or work in offline mode?")
-                        .setPositiveButton("Retry") { _, _ -> initializeRealmWithNetwork() }
+                        .setPositiveButton("Retry") { _, _ -> initializeRealm() }
                         .setNegativeButton("Offline Mode") { _, _ ->
                             // Try to initialize with offline mode
                             initializeOfflineRealm()
@@ -126,44 +164,66 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupNetworkSynchronization() {
-        // Get repositories
         val app = application as BerryHarvestApplication
-        val workerRepo = app.repositoryProvider.workerRepository
-        val assignmentRepo = app.repositoryProvider.assignmentRepository
 
-        // Create enhanced network manager if not already created
-        val networkManager = app.repositoryProvider.networkManager
-
-        // Start observing network changes and sync when needed
+        // Use the global sync manager
         lifecycleScope.launch {
-            networkManager.connectionState.collect { state ->
+            app.networkStatusManager.connectionState.collect { state ->
                 if (state is ConnectionState.Connected) {
-                    Log.d("MainActivity", "Network connected, initiating sync")
-                    try {
-                        workerRepo.syncPendingChanges()
-                        assignmentRepo.syncPendingChanges()
-                    } catch (e: Exception) {
-                        Log.e("MainActivity", "Error syncing data", e)
+                    // Show sync indicator if needed
+                    if (app.syncManager.hasPendingChanges()) {
+                        showSyncingSnackbar()
                     }
                 }
             }
         }
-
-        // Start repositories' own sync mechanisms
-        workerRepo.startSyncWhenOnline(lifecycleScope, networkManager)
-        assignmentRepo.startSyncWhenOnline(lifecycleScope, networkManager)
     }
 
-    // Helper method to update UI based on connection state
-    private fun updateNetworkStatusUI(state: ConnectionState) {
-        runOnUiThread {
-            // Example: Update a status TextView or indicator
-            // networkStatusTextView.text = when(state) {
-            //     is ConnectionState.Connected -> "Online"
-            //     is ConnectionState.Disconnected -> "Offline"
-            //     is ConnectionState.Error -> "Error: ${state.message}"
-            // }
+    private fun showSyncingSnackbar() {
+        // Dismiss any existing snackbar first
+        syncSnackbar?.dismiss()
+
+        val syncingMessage = "Синхронізація даних..."
+        syncSnackbar = Snackbar.make(binding.root, syncingMessage, Snackbar.LENGTH_INDEFINITE)
+            .setAction("Скрити") {
+                syncSnackbar?.dismiss()
+                syncSnackbar = null
+            }
+
+        val app = application as BerryHarvestApplication
+        lifecycleScope.launch {
+            try {
+                val result = app.syncManager.performSync()
+
+                // Make sure to dismiss the current snackbar
+                runOnUiThread {
+                    syncSnackbar?.dismiss()
+                    syncSnackbar = null
+
+                    // Show a new completion snackbar
+                    when (result) {
+                        is com.example.berryharvest.data.repository.Result.Success -> {
+                            Snackbar.make(binding.root, "Синхронізація завершена", Snackbar.LENGTH_SHORT).show()
+                        }
+                        is com.example.berryharvest.data.repository.Result.Error -> {
+                            Snackbar.make(binding.root, "Помилка синхронізації: ${result.message}", Snackbar.LENGTH_LONG).show()
+                        }
+                        is com.example.berryharvest.data.repository.Result.Loading -> {
+                            // This should not happen
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Ensure snackbar is dismissed even if an error occurs
+                runOnUiThread {
+                    syncSnackbar?.dismiss()
+                    syncSnackbar = null
+                    Snackbar.make(binding.root, "Помилка синхронізації: ${e.message}", Snackbar.LENGTH_LONG).show()
+                }
+            }
         }
+
+        syncSnackbar?.show()
     }
 
     private fun showProgressDialog(message: String) {
@@ -214,32 +274,44 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showNetworkError() {
-        Snackbar.make(
-            binding.root,
-            "Немає з’єднання. Деякі функції можуть бути недоступні",
-            Snackbar.LENGTH_LONG
-        ).show()
-    }
-
     private fun showError(message: String) {
         Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG).show()
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.main, menu)
-        menu.add("Test Database").apply {
-            setOnMenuItemClickListener {
+
+        // Add sync button
+        menu.add(Menu.NONE, R.id.action_sync, Menu.NONE, "Синхронізувати")
+            .setIcon(R.drawable.ic_sync)
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
+
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_sync -> {
+                if ((application as BerryHarvestApplication).networkStatusManager.isNetworkAvailable()) {
+                    showSyncingSnackbar()
+                } else {
+                    Snackbar.make(binding.root, "Немає мережевого з'єднання", Snackbar.LENGTH_SHORT).show()
+                }
                 true
             }
+            R.id.action_settings -> {
+                // Handle settings
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
         }
-        return true
     }
 
     override fun onSupportNavigateUp(): Boolean {
         val navController = findNavController(R.id.nav_host_fragment_content_main)
         return navController.navigateUp(appBarConfiguration) || super.onSupportNavigateUp()
     }
+
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -254,9 +326,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        realm?.close()
+        syncSnackbar?.dismiss()
+        syncSnackbar = null
         super.onDestroy()
     }
-
 }
 

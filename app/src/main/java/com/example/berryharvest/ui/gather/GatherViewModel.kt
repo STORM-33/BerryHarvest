@@ -11,6 +11,7 @@ import com.example.berryharvest.data.repository.Result
 import com.example.berryharvest.data.model.Worker
 import com.example.berryharvest.data.model.Assignment
 import com.example.berryharvest.data.model.Gather
+import com.example.berryharvest.data.repository.ConnectionState
 import io.realm.kotlin.ext.query
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -21,6 +22,7 @@ import java.util.UUID
 class GatherViewModel(application: Application) : AndroidViewModel(application) {
     private val app = getApplication<BerryHarvestApplication>()
     private val settingsRepository = app.repositoryProvider.settingsRepository
+    private val networkStatusManager = app.networkStatusManager
 
     private val _punnetPrice = MutableLiveData<Float>()
     val punnetPrice: LiveData<Float> = _punnetPrice
@@ -34,8 +36,19 @@ class GatherViewModel(application: Application) : AndroidViewModel(application) 
     private val _successMessage = MutableLiveData<Boolean>()
     val successMessage: LiveData<Boolean> = _successMessage
 
+    // Add connection state LiveData
+    private val _connectionState = MutableLiveData<ConnectionState>()
+    val connectionState: LiveData<ConnectionState> = _connectionState
+
     init {
         loadPunnetPrice()
+
+        // Observe connection state from the centralized manager
+        viewModelScope.launch {
+            networkStatusManager.connectionStateLiveData.observeForever { state ->
+                _connectionState.postValue(state)
+            }
+        }
     }
 
     fun handleScanResult(workerId: String) {
@@ -129,6 +142,25 @@ class GatherViewModel(application: Application) : AndroidViewModel(application) 
             } catch (e: Exception) {
                 _errorMessage.postValue("Помилка при завантаженні ціни: ${e.message}")
                 _punnetPrice.postValue(0.0f)
+            }
+        }
+    }
+
+    fun syncData() {
+        viewModelScope.launch {
+            if (networkStatusManager.isNetworkAvailable()) {
+                try {
+                    val result = app.syncManager.performSync()
+                    if (result is Result.Success) {
+                        _successMessage.postValue(true)
+                    } else if (result is Result.Error) {
+                        _errorMessage.postValue("Синхронізація не вдалася: ${result.message}")
+                    }
+                } catch (e: Exception) {
+                    _errorMessage.postValue("Помилка синхронізації: ${e.message}")
+                }
+            } else {
+                _errorMessage.postValue("Немає з'єднання з мережею")
             }
         }
     }

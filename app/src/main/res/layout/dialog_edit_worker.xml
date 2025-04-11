@@ -9,12 +9,12 @@
         android:id="@+id/editTextFullName"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Полное имя" />
+        android:hint="Повне ім’я" />
 
     <EditText
         android:id="@+id/editTextPhoneNumber"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Номер телефона" />
+        android:hint="Номер телефону" />
 
 </LinearLayout>

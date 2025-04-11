@@ -34,10 +34,12 @@ class AssignRowsFragment : Fragment() {
     private lateinit var assignButton: Button
     private lateinit var assignmentsRecyclerView: RecyclerView
     private lateinit var loadingProgressBar: ProgressBar
-    private lateinit var networkStatusTextView: TextView
+    private lateinit var clearAllRowsButton: Button
 
     private var selectedWorker: Worker? = null
     private lateinit var assignmentAdapter: AssignmentAdapter
+
+
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -50,13 +52,65 @@ class AssignRowsFragment : Fragment() {
         assignButton = view.findViewById(R.id.assignButton)
         assignmentsRecyclerView = view.findViewById(R.id.assignmentsRecyclerView)
         loadingProgressBar = view.findViewById(R.id.loadingProgressBar)
-        networkStatusTextView = view.findViewById(R.id.networkStatusTextView)
+        clearAllRowsButton = view.findViewById(R.id.clearAllRowsButton)
 
         setupUI()
         setupWorkerSearch()
         observeViewModel()
 
+        // Set up clear all rows button
+        clearAllRowsButton.setOnClickListener {
+            showClearAllRowsConfirmation()
+        }
+
         return view
+    }
+
+    private fun showClearAllRowsConfirmation() {
+        AlertDialog.Builder(requireContext())
+            .setTitle("Видалити всі ряди")
+            .setMessage("Ви впевнені, що бажаєте видалити ВСІ ряди? Цю дію неможливо скасувати.")
+            .setPositiveButton("Так") { _, _ ->
+                // Show loading
+                loadingProgressBar.visibility = View.VISIBLE
+
+                viewLifecycleOwner.lifecycleScope.launch {
+                    try {
+                        val result = viewModel.deleteAllRows()
+                        withContext(Dispatchers.Main) {
+                            loadingProgressBar.visibility = View.GONE
+                            when (result) {
+                                is com.example.berryharvest.data.repository.Result.Success -> {
+                                    Toast.makeText(context, "Всі ряди видалено", Toast.LENGTH_SHORT).show()
+                                }
+                                is com.example.berryharvest.data.repository.Result.Error -> {
+                                    Toast.makeText(context, "Помилка видалення рядів: ${result.message}", Toast.LENGTH_SHORT).show()
+                                }
+                                is com.example.berryharvest.data.repository.Result.Loading -> {
+                                    // This shouldn't happen but handle it for completeness
+                                    Toast.makeText(context, "Операція в процесі...", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) {
+                            loadingProgressBar.visibility = View.GONE
+                            Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("Ні", null)
+            .show()
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        // Force initial data load when the view is created
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.loadInitialData()
+        }
     }
 
     private fun setupUI() {
@@ -109,31 +163,6 @@ class AssignRowsFragment : Fragment() {
             viewModel.isLoading.collect { isLoading ->
                 loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
                 assignButton.isEnabled = !isLoading
-            }
-        }
-
-        // Observe connection state
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.connectionState.collect { state ->
-                updateConnectionStatusUI(state)
-            }
-        }
-    }
-
-    @SuppressLint("SetTextI18n")
-    private fun updateConnectionStatusUI(state: ConnectionState) {
-        when (state) {
-            is ConnectionState.Connected -> {
-                networkStatusTextView.text = "Підключено"
-                networkStatusTextView.setTextColor(resources.getColor(android.R.color.holo_green_dark, null))
-            }
-            is ConnectionState.Disconnected -> {
-                networkStatusTextView.text = "Офлайн режим"
-                networkStatusTextView.setTextColor(resources.getColor(android.R.color.holo_orange_dark, null))
-            }
-            is ConnectionState.Error -> {
-                networkStatusTextView.text = "Помилка з'єднання"
-                networkStatusTextView.setTextColor(resources.getColor(android.R.color.holo_red_dark, null))
             }
         }
     }
@@ -191,7 +220,7 @@ class AssignRowsFragment : Fragment() {
                 Log.d(TAG, "Existing assignment check: ${existingAssignment?._id ?: "none"}")
 
                 // Check network status
-                val isNetworkAvailable = app.networkManager?.isNetworkAvailable() ?: false
+                val isNetworkAvailable = app.networkStatusManager.isNetworkAvailable()
                 Log.d(TAG, "Network available for assignment: $isNetworkAvailable")
 
                 // Use the safe transaction wrapper

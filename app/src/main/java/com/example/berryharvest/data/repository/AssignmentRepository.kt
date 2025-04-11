@@ -6,12 +6,14 @@ import com.example.berryharvest.BerryHarvestApplication
 import com.example.berryharvest.data.network.EnhancedNetworkManager
 import com.example.berryharvest.data.model.Assignment
 import com.example.berryharvest.ui.assign_rows.AssignmentGroup
+import io.realm.kotlin.MutableRealm
 import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlin.time.Duration.Companion.seconds
 
 private const val TAG = "AssignmentRepository"
 private const val ENTITY_TYPE = "assignment"
@@ -78,10 +80,14 @@ class AssignmentRepository(
         try {
             Log.d(TAG, "Getting assignments grouped by row")
             val realm = getRealm()
+
             realm.query<Assignment>().asFlow()
                 .map { results ->
+                    // Filter out deleted assignments if any
+                    val validAssignments = results.list.filter { !it.isDeleted }
+
                     // Group assignments by row
-                    val assignmentsByRow = results.list.groupBy { it.rowNumber }
+                    val assignmentsByRow = validAssignments.groupBy { it.rowNumber }
 
                     // Convert to AssignmentGroup objects
                     val groups = assignmentsByRow.map { (rowNumber, assignments) ->
@@ -339,6 +345,21 @@ class AssignmentRepository(
         currentOperations.add(operation)
         _pendingOperations.value = currentOperations
         Log.d(TAG, "Added pending operation: $operation")
+    }
+
+    override fun hasPendingOperations(): Boolean {
+        return _pendingOperations.value.isNotEmpty()
+    }
+
+    override fun getPendingOperationsCount(): Int {
+        return _pendingOperations.value.size
+    }
+
+    override suspend fun <R> safeWriteWithTimeout(block: MutableRealm.() -> R): R {
+        val app = application as BerryHarvestApplication
+        return withTimeout(5.seconds) {
+            app.safeWriteTransaction(block)
+        }
     }
 
     override fun close() {

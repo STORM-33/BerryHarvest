@@ -3,25 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp">
-
-    <!-- Network Status Indicator -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="end"
-        android:layout_marginBottom="8dp">
-
-        <TextView
-            android:id="@+id/networkStatusTextView"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Стан мережі"
-            android:textSize="14sp"
-            android:textStyle="bold" />
-
-    </LinearLayout>
+    android:padding="12dp">  <!-- Reduced from 16dp -->
 
     <EditText
         android:id="@+id/editTextFullName"
@@ -34,31 +16,34 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="Номер телефону"
-        android:inputType="phone" />
+        android:inputType="phone"
+        android:layout_marginTop="4dp" />
 
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content">
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp">
 
-        <Button
-            android:id="@+id/buttonAddWorker"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Додати працівника" />
-
-        <ProgressBar
-            android:id="@+id/loadingProgressBar"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:layout_gravity="center_vertical|end"
-            android:layout_marginEnd="16dp"
-            android:visibility="gone" />
-    </FrameLayout>
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerViewWorkers"
+    <Button
+        android:id="@+id/buttonAddWorker"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_height="wrap_content"
+        android:text="Додати працівника" />
 
-</LinearLayout>
+    <ProgressBar
+        android:id="@+id/loadingProgressBar"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_gravity="center_vertical|end"
+        android:layout_marginEnd="16dp"
+        android:visibility="gone" />
+</FrameLayout>
+
+<androidx.recyclerview.widget.RecyclerView
+android:id="@+id/recyclerViewWorkers"
+android:layout_width="match_parent"
+android:layout_height="0dp"
+android:layout_weight="1" />
+
+    </LinearLayout>

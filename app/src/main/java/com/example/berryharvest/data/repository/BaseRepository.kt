@@ -1,5 +1,6 @@
 package com.example.berryharvest.data.repository
 
+import io.realm.kotlin.MutableRealm
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -54,7 +55,24 @@ interface BaseRepository<T> {
     suspend fun syncPendingChanges(): Result<Boolean>
 
     /**
+     * Checks if there are pending operations that need to be synced.
+     * @return True if there are pending operations.
+     */
+    fun hasPendingOperations(): Boolean
+
+    /**
+     * Get the count of pending operations.
+     * @return The number of pending operations.
+     */
+    fun getPendingOperationsCount(): Int
+
+    /**
      * Close repository resources.
      */
     fun close()
+
+    /**
+     * Performs a write transaction with timeout to avoid blocking indefinitely.
+     */
+    suspend fun <R> safeWriteWithTimeout(block: MutableRealm.() -> R): R
 }

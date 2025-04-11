@@ -1,5 +1,6 @@
 package com.example.berryharvest.ui.assign_rows
 
+import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -13,8 +14,8 @@ import io.realm.kotlin.ext.query
 
 class WorkerInRowAdapter(
     private val assignments: List<Assignment>,
-    private val onMoveWorkerClick: (Assignment) -> Unit,
-    private val realmProvider: () -> Realm? // Функция для получения текущего Realm
+    private val workerDetailsMap: Map<String, Worker>,  // This parameter is already correct
+    private val onMoveWorkerClick: (Assignment) -> Unit
 ) : RecyclerView.Adapter<WorkerInRowAdapter.WorkerViewHolder>() {
 
     inner class WorkerViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -30,17 +31,25 @@ class WorkerInRowAdapter(
     override fun onBindViewHolder(holder: WorkerViewHolder, position: Int) {
         val assignment = assignments[position]
 
-        // Получаем текущий Realm при привязке данных
-        val realm = realmProvider()
-        val worker = realm?.query<Worker>("_id == $0", assignment.workerId)?.first()?.find()
+        // Get worker details from the map rather than from Realm directly
+        val worker = workerDetailsMap[assignment.workerId]
 
         val workerInfo = if (worker != null) {
-            "${worker.fullName} (${worker.sequenceNumber})"
+            "${worker.fullName} [${worker.sequenceNumber}]"
         } else {
             "Невідомий працівник"
         }
 
         holder.workerTextView.text = workerInfo
+
+        // Set background color based on sync status - subtle
+        if (!assignment.isSynced) {
+            holder.workerTextView.setBackgroundColor(Color.parseColor("#15FFC107")) // Very light amber
+            holder.workerTextView.setCompoundDrawablesWithIntrinsicBounds(0, 0, R.drawable.ic_sync_small, 0)
+        } else {
+            holder.workerTextView.setBackgroundColor(Color.TRANSPARENT)
+            holder.workerTextView.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
+        }
 
         holder.workerTextView.setOnLongClickListener {
             onMoveWorkerClick(assignment)
