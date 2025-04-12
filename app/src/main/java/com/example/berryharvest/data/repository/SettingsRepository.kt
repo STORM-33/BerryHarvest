@@ -8,8 +8,13 @@ import com.example.berryharvest.data.model.Settings
 import io.realm.kotlin.MutableRealm
 import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
+import io.realm.kotlin.mongodb.subscriptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
 
 private const val TAG = "SettingsRepository"
@@ -103,39 +108,106 @@ class SettingsRepository(
     suspend fun getPunnetPrice(): Float {
         try {
             val realm = getRealm()
-            val settings = realm.query<Settings>().first().find()
-            return settings?.punnetPrice ?: 0f
+
+            // Find all Settings objects
+            val allSettings = realm.query<Settings>().find()
+
+            if (allSettings.isEmpty()) {
+                Log.d(TAG, "No settings found, returning default price 0")
+                return 0f
+            } else if (allSettings.size > 1) {
+                // Multiple settings found - log warning and use the one with highest price
+                Log.w(TAG, "Multiple settings found (${allSettings.size}), consolidating...")
+
+                // Get the most recently modified setting (assuming higher ID is more recent)
+                // or the one with the highest price if you prefer
+                val mostRecentSetting = allSettings.maxByOrNull { it.punnetPrice }
+
+                // Schedule a cleanup for the duplicates (in a separate coroutine)
+                cleanupDuplicateSettings(allSettings.map { it._id }, mostRecentSetting?._id)
+
+                return mostRecentSetting?.punnetPrice ?: 0f
+            } else {
+                // Normal case - just one settings object
+                return allSettings.first().punnetPrice
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error getting punnet price", e)
             return 0f
         }
     }
 
+    // Add this method to clean up duplicate settings
+    private fun cleanupDuplicateSettings(allIds: List<String>, idToKeep: String?) {
+        if (idToKeep == null || allIds.size <= 1) return
+
+        // Launch in a background scope to not block the UI
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                Log.d(TAG, "Starting cleanup of duplicate settings...")
+                val realm = getRealm()
+
+                realm.write {
+                    // Delete all settings except the one to keep
+                    val settingsToDelete = query<Settings>("_id != $0", idToKeep).find()
+                    Log.d(TAG, "Found ${settingsToDelete.size} settings to delete")
+
+                    settingsToDelete.forEach { setting ->
+                        try {
+                            delete(setting)
+                            Log.d(TAG, "Deleted duplicate setting: ${setting._id}")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to delete setting: ${setting._id}", e)
+                        }
+                    }
+                }
+
+                Log.d(TAG, "Duplicate settings cleanup completed")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error cleaning up duplicate settings", e)
+            }
+        }
+    }
+
     suspend fun updatePunnetPrice(price: Float): Result<Boolean> {
         return try {
             Log.d(TAG, "Updating punnet price to $price")
+            val realm = getRealm()
 
-            // Use the application's safe transaction method
+            // Find all existing settings
+            val allSettings = realm.query<Settings>().find()
+
             app.safeWriteTransaction {
-                val settings = query<Settings>().first().find()
-                if (settings != null) {
-                    settings.punnetPrice = price
-                    settings.isSynced = networkManager.isNetworkAvailable()
-                    Log.d(TAG, "Updated existing settings with price $price")
-                } else {
+                if (allSettings.isEmpty()) {
+                    // No settings exist, create a new one
+                    Log.d(TAG, "No settings found, creating new")
                     copyToRealm(Settings().apply {
-                        _id = java.util.UUID.randomUUID().toString()
+                        _id = UUID.randomUUID().toString()
                         punnetPrice = price
                         isSynced = networkManager.isNetworkAvailable()
                     })
-                    Log.d(TAG, "Created new settings with price $price")
-                }
-            }
+                } else if (allSettings.size > 1) {
+                    // Multiple settings exist, update the first one and schedule cleanup
+                    Log.w(TAG, "Multiple settings found (${allSettings.size}), consolidating")
+                    val firstSetting = query<Settings>("_id == $0", allSettings.first()._id).first().find()
+                    firstSetting?.punnetPrice = price
+                    firstSetting?.isSynced = networkManager.isNetworkAvailable()
 
-            if (!networkManager.isNetworkAvailable()) {
-                addPendingOperation(
-                    PendingOperation.Update("settings", ENTITY_TYPE)
-                )
+                    // Schedule cleanup outside the transaction
+                    val idToKeep = allSettings.first()._id
+                    val allIds = allSettings.map { it._id }
+
+                    // Launch cleanup after this transaction completes
+                    CoroutineScope(Dispatchers.IO).launch {
+                        cleanupDuplicateSettings(allIds, idToKeep)
+                    }
+                } else {
+                    // Normal case - just one settings object
+                    Log.d(TAG, "Updating existing settings")
+                    val setting = query<Settings>().first().find()
+                    setting?.punnetPrice = price
+                    setting?.isSynced = networkManager.isNetworkAvailable()
+                }
             }
 
             Log.d(TAG, "Punnet price updated successfully")

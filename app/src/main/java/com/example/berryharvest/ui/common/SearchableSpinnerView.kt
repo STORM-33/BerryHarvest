@@ -37,8 +37,21 @@ class SearchableSpinnerView @JvmOverloads constructor(
         resultsRecyclerView = findViewById(R.id.resultsRecyclerView)
         dropdownContainer = findViewById(R.id.dropdownContainer)
 
+        // Ensure these are explicitly set during initialization
+        isSelectionMode = false
+        searchEditText.isFocusable = true
+        searchEditText.isFocusableInTouchMode = true
+
         setupViews()
         setupBackHandler()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        // Reset selection mode when view is reattached
+        isSelectionMode = false
+        searchEditText.isFocusable = true
+        searchEditText.isFocusableInTouchMode = true
     }
 
     private fun setupViews() {
@@ -125,16 +138,31 @@ class SearchableSpinnerView @JvmOverloads constructor(
         onItemSelectedListener = listener
     }
 
+    public fun hideDropdownForced() {
+        dropdownContainer.visibility = View.GONE
+        isSelectionMode = false
+    }
+
     @SuppressLint("SetTextI18n")
     fun clearSelection() {
         searchEditText.setText("")
         isSelectionMode = false
         searchEditText.isFocusable = true
         searchEditText.isFocusableInTouchMode = true
+
+        // Additional reset steps
+        searchEditText.clearFocus()
+        hideDropdown()
+
+        // Force UI update
+        searchEditText.post {
+            searchEditText.invalidate()
+        }
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         hideDropdown()
+        clearSelection()
     }
 }

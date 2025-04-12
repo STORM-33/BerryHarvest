@@ -68,104 +68,93 @@ class BerryHarvestApplication : Application() {
         Log.d("Realm", "Creating new Realm instance")
 
         try {
-            // Use app's files directory which is guaranteed to be accessible
-            val realmDirectory = File(filesDir, "realm_data").apply {
-                if (!exists()) {
-                    if (!mkdirs()) {
-                        Log.w("Realm", "Failed to create directory: $path")
-                    }
-                }
-            }
-
-            // Always create a local configuration first
-            val localConfig = RealmConfiguration.Builder(
-                setOf(Worker::class, Gather::class, Assignment::class, Settings::class)
-            )
-                .schemaVersion(1)
-                .directory(realmDirectory.path) // Use the app's files directory
-                .name("local.realm")
-                .build()
-
-            // If network is not available or offline mode is forced, use local-only config right away
-            if (forceOfflineMode || networkStatusManager.isNetworkAvailable() == false) {
-                Log.d("Realm", "Network unavailable, creating local Realm")
-                return Realm.open(localConfig).also {
-                    Log.d("Realm", "Local Realm opened successfully")
-                    realmInstance = it
-                }
-            }
-
-            // Otherwise try to use sync config
+            // Increased timeout to 15 seconds (from what was likely 10 before)
             return withTimeout(15000) { // 15 second timeout
-                try {
-                    val app = app ?: throw IllegalStateException("App is not initialized")
-                    Log.d("Realm", "App reference obtained: ${app.configuration.appId}")
+                val app = app ?: throw IllegalStateException("App is not initialized")
+                Log.d("Realm", "App reference obtained: ${app.configuration.appId}")
 
-                    // Try to login with anonymous credentials
-                    Log.d("Realm", "Attempting anonymous login")
-                    val user = try {
-                        app.login(Credentials.anonymous())
-                    } catch (e: Exception) {
-                        Log.e("Realm", "Login failed: ${e.message}")
-                        // If login failed, fall back to local database
-                        return@withTimeout Realm.open(localConfig).also {
-                            Log.d("Realm", "Fallback to local Realm after login failure")
-                            realmInstance = it
-                        }
-                    }
+                // Log network status
+                val networkAvailable = networkStatusManager.isNetworkAvailable()
+                Log.d("Realm", "Network available: $networkAvailable")
 
-                    // Configure sync
-                    val syncConfig = SyncConfiguration.Builder(
-                        user,
+                // If network is not available, create local-only Realm to prevent sync issues
+                if (forceOfflineMode || networkStatusManager.isNetworkAvailable() == false) {
+                    Log.d("Realm", "Network unavailable, creating local Realm")
+                    val config = RealmConfiguration.Builder(
                         setOf(Worker::class, Gather::class, Assignment::class, Settings::class)
                     )
                         .schemaVersion(1)
-                        .initialSubscriptions { realm ->
-                            add(realm.query<Worker>())
-                            add(realm.query<Gather>())
-                            add(realm.query<Assignment>())
-                            add(realm.query<Settings>())
-                        }
-                        .waitForInitialRemoteData(1.seconds) // Short timeout
+                        .directory("local_realm")
                         .build()
 
-                    Log.d("Realm", "Opening synced Realm")
+                    return@withTimeout Realm.open(config).also {
+                        Log.d("Realm", "Local Realm opened successfully")
+                        realmInstance = it
+                    }
+                }
 
-                    try {
-                        Realm.open(syncConfig).also {
-                            Log.d("Realm", "Synced Realm opened successfully")
-                            realmInstance = it
-                        }
-                    } catch (e: Exception) {
-                        Log.e("Realm", "Failed to open synced Realm: ${e.message}")
+                // Try to login with anonymous credentials
+                Log.d("Realm", "Attempting anonymous login")
+                val user = try {
+                    app.login(Credentials.anonymous())
+                } catch (e: Exception) {
+                    Log.e("Realm", "Login failed: ${e.message}")
+                    throw e
+                }
+                Log.d("Realm", "Login successful, configuring sync")
 
-                        // Fall back to local if sync fails
-                        Realm.open(localConfig).also {
-                            Log.d("Realm", "Local fallback Realm opened successfully")
-                            realmInstance = it
-                        }
+                // Configure sync with reduced initial data download time
+                val config = SyncConfiguration.Builder(
+                    user,
+                    setOf(Worker::class, Gather::class, Assignment::class, Settings::class)
+                )
+                    .schemaVersion(1)
+                    .initialSubscriptions { realm ->
+                        // Keep subscriptions minimal
+                        add(realm.query<Worker>())
+                        add(realm.query<Gather>())
+                        add(realm.query<Assignment>())
+                        add(realm.query<Settings>())
+                    }
+                    .waitForInitialRemoteData(1.seconds) // Reduced from default to 1 second max
+                    .build()
+
+                Log.d("Realm", "Opening synced Realm")
+
+                try {
+                    Realm.open(config).also {
+                        Log.d("Realm", "Synced Realm opened successfully")
+                        realmInstance = it
                     }
                 } catch (e: Exception) {
-                    Log.e("Realm", "Error in sync attempt: ${e.message}")
+                    Log.e("Realm", "Failed to open synced Realm: ${e.message}")
 
-                    // Fall back to local in any case of error
+                    // Fallback to local if sync fails
+                    Log.d("Realm", "Falling back to local Realm")
+                    val localConfig = RealmConfiguration.Builder(
+                        setOf(Worker::class, Gather::class, Assignment::class, Settings::class)
+                    )
+                        .schemaVersion(1)
+                        .directory("local_fallback")
+                        .build()
+
                     Realm.open(localConfig).also {
-                        Log.d("Realm", "Local fallback Realm opened after error")
+                        Log.d("Realm", "Local fallback Realm opened successfully")
                         realmInstance = it
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e("Realm", "Error initializing Realm: ${e.message}", e)
+            Log.e("Realm", "Error initializing Realm with timeout: ${e.message}")
 
-            // Create a fallback in-memory instance
+            // Last resort - try a simple local Realm
             try {
+                Log.d("Realm", "Final fallback to basic local Realm")
                 val config = RealmConfiguration.Builder(
                     setOf(Worker::class, Gather::class, Assignment::class, Settings::class)
                 )
                     .schemaVersion(1)
-                    .inMemory() // Use in-memory as last resort
-                    .name("fallback")
+                    .inMemory() // Use in-memory as last resort to avoid any disk issues
                     .build()
 
                 return Realm.open(config).also {
@@ -173,7 +162,7 @@ class BerryHarvestApplication : Application() {
                     realmInstance = it
                 }
             } catch (innerE: Exception) {
-                Log.e("Realm", "Even in-memory fallback failed", innerE)
+                Log.e("Realm", "All Realm initialization attempts failed", innerE)
                 throw innerE
             }
         }

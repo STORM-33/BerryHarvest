@@ -6,7 +6,7 @@
     android:layout_height="match_parent"
     android:padding="16dp">
 
-    <!-- Верхняя часть: ввод данных и основные кнопки -->
+    <!-- Вся "шапка" с вводом, спиннером и кнопками -->
     <LinearLayout
         android:id="@+id/assignWorkerLayout"
         android:layout_width="match_parent"
@@ -18,7 +18,7 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <!-- Ряд: метка и ввод номера ряда -->
+        <!-- Row Selection (Ряд) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -42,13 +42,24 @@
                 android:layout_marginEnd="16dp" />
         </LinearLayout>
 
-        <!-- Выбор работника через спиннер -->
-        <com.example.berryharvest.ui.common.SearchableSpinnerView
-            android:id="@+id/workerSearchView"
+        <!-- Worker Selection: Spinner + кнопка Видалити всі ряди -->
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="8dp">
 
-        <!-- Кнопка "Призначити" (с накладывающимся ProgressBar) -->
+            <com.example.berryharvest.ui.common.SearchableSpinnerView
+                android:id="@+id/workerSearchView"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp" />
+
+        </LinearLayout>
+
+        <!-- Кнопка Призначити (с прогрессбаром) -->
         <FrameLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -67,10 +78,9 @@
                 android:layout_gravity="center"
                 android:visibility="gone" />
         </FrameLayout>
-
     </LinearLayout>
 
-    <!-- Список назначений (например, список рядов) -->
+    <!-- Список назначений (RecyclerView) -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/assignmentsRecyclerView"
         android:layout_width="0dp"
@@ -79,22 +89,8 @@
         app:layout_constraintTop_toBottomOf="@id/assignWorkerLayout"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintBottom_toTopOf="@id/clearAllRowsButton" />
-
-    <!-- Кнопка удаления внизу страницы, на всю ширину -->
-    <Button
-        android:id="@+id/clearAllRowsButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Видалити всі ряди"
-        android:backgroundTint="#F44336"
-        android:textColor="#FFFFFF"
-        android:layout_marginTop="8dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:layout_constraintBottom_toBottomOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
-
 
 

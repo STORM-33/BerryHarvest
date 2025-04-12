@@ -10,6 +10,7 @@ import com.example.berryharvest.data.repository.ConnectionState
 import com.example.berryharvest.data.repository.Result
 import com.example.berryharvest.data.model.Worker
 import io.realm.kotlin.ext.query
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -137,6 +138,21 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    private fun observeConnectionState() {
+        viewModelScope.launch {
+            // Use the centralized network status manager instead of repository
+            networkStatusManager.connectionState.collect { state ->
+                _connectionState.value = state
+
+                // If we're back online, try to sync any pending changes
+                if (state is ConnectionState.Connected) {
+                    Log.d(TAG, "Network is available, syncing pending changes")
+                    syncPendingChanges()
+                }
+            }
+        }
+    }
+
     fun loadInitialData() {
         viewModelScope.launch {
             try {
@@ -240,28 +256,51 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    private fun observeConnectionState() {
+    private fun syncPendingChanges() {
         viewModelScope.launch {
-            // Use the centralized network status manager
-            networkStatusManager.connectionState.collect { state ->
-                _connectionState.value = state
+            try {
+                // Use the global sync manager instead of repository-specific calls
+                Log.d(TAG, "Using global sync manager to sync pending changes")
+                app.syncManager.performSync(silent = true)
 
-                // If we're back online, try to sync any pending changes
-                if (state is ConnectionState.Connected) {
-                    Log.d(TAG, "Network is available, syncing pending changes")
-                    syncPendingChanges()
-                }
+                // After sync is complete, explicitly refresh the assignments data
+                refreshAssignmentsData()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error syncing changes", e)
+                _error.value = "Failed to sync changes: ${e.message}"
             }
         }
     }
 
-    private fun syncPendingChanges() {
+    private fun refreshAssignmentsData() {
         viewModelScope.launch {
+            Log.d(TAG, "Refreshing assignments data after sync")
+            _isLoading.value = true
+
             try {
-                // Use the global sync manager
-                app.syncManager.performSync(silent = true)
+                // Force a UI refresh by clearing and then reloading
+                val currentList = _assignments.value.toList()
+                _assignments.value = emptyList() // Clear first
+                delay(50) // Short delay
+
+                // Then reload with fresh data
+                assignmentRepository.getAllGroupedByRow().collect { result ->
+                    if (result is Result.Success) {
+                        Log.d(TAG, "Successfully refreshed ${result.data.size} assignment groups")
+                        _assignments.value = result.data
+
+                        // Also check and update UI even if no data actually changed
+                        if (result.data.isEmpty() && currentList.isNotEmpty()) {
+                            _assignments.value = currentList // Restore if no new data
+                        }
+                    }
+                    // We only need one emission, so break the collection
+                    return@collect
+                }
             } catch (e: Exception) {
-                Log.e(TAG, "Error syncing changes", e)
+                Log.e(TAG, "Error refreshing assignments data", e)
+            } finally {
+                _isLoading.value = false
             }
         }
     }

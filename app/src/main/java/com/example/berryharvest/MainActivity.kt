@@ -8,7 +8,9 @@ import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.widget.EditText
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
@@ -25,6 +27,7 @@ import io.realm.kotlin.Realm
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
@@ -63,6 +66,7 @@ class MainActivity : AppCompatActivity() {
         setupNetworkStatusIndicator()
         setupNetworkSynchronization()
     }
+
 
     private fun setupNetworkStatusIndicator() {
         val networkStatusManager = (application as BerryHarvestApplication).networkStatusManager
@@ -132,13 +136,6 @@ class MainActivity : AppCompatActivity() {
                 withContext(Dispatchers.Main) {
                     hideProgressDialog()
                     Log.d("REALM", "Realm initialized successfully")
-
-                    // Display success message
-                    Snackbar.make(
-                        binding.root,
-                        "Database initialized successfully",
-                        Snackbar.LENGTH_SHORT
-                    ).show()
                 }
             } catch (e: Exception) {
                 Log.e("REALM", "Realm initialization error: ${e.message}", e)
@@ -151,9 +148,9 @@ class MainActivity : AppCompatActivity() {
                     // Create a dialog with retry option
                     AlertDialog.Builder(this@MainActivity)
                         .setTitle("Connection Error")
-                        .setMessage("$errorMessage\n\nWould you like to retry or work in offline mode?")
-                        .setPositiveButton("Retry") { _, _ -> initializeRealm() }
-                        .setNegativeButton("Offline Mode") { _, _ ->
+                        .setMessage("$errorMessage\n\nБажаєте спробувати ще раз чи продовжити в оффлайн режимі?")
+                        .setPositiveButton("повторити") { _, _ -> initializeRealm() }
+                        .setNegativeButton("оффлайн") { _, _ ->
                             // Try to initialize with offline mode
                             initializeOfflineRealm()
                         }
@@ -299,6 +296,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 true
             }
+            R.id.action_new_workday -> {
+                startNewWorkday()
+                true
+            }
             R.id.action_settings -> {
                 // Handle settings
                 true
@@ -307,12 +308,197 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun startNewWorkday() {
+        AlertDialog.Builder(this)
+            .setTitle("Новий робочий день")
+            .setMessage("Ви дійсно бажаєте розпочати новий робочий день?")
+            .setPositiveButton("Так") { _, _ ->
+                showSaveAssignmentsDialog()
+            }
+            .setNegativeButton("Ні", null)
+            .show()
+    }
+
+    private fun showSaveAssignmentsDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Збереження призначень")
+            .setMessage("Зберегти призначення на рядки?")
+            .setPositiveButton("Так") { _, _ ->
+                // If user wants to save assignments, go directly to punnet price dialog
+                showPunnetPriceUpdateDialog()
+            }
+            .setNegativeButton("Ні") { _, _ ->
+                // If user doesn't want to save, ask if they want to delete assignments
+                showDeleteAssignmentsConfirmation()
+            }
+            .show()
+    }
+
+    private fun showDeleteAssignmentsConfirmation() {
+        AlertDialog.Builder(this)
+            .setTitle("Видалення призначень")
+            .setMessage("Бажаєте видалити всі поточні призначення на рядки?")
+            .setPositiveButton("Так") { _, _ ->
+                // User confirmed deletion
+                deleteAllAssignments()
+            }
+            .setNegativeButton("Ні") { _, _ ->
+                // Skip deletion and proceed to next step
+                showPunnetPriceUpdateDialog()
+            }
+            .show()
+    }
+
+    private fun deleteAllAssignments() {
+        // Show progress while deleting
+        val progressDialog = AlertDialog.Builder(this)
+            .setTitle("Видалення")
+            .setMessage("Видалення всіх призначень...")
+            .setCancelable(false)
+            .create()
+
+        progressDialog.show()
+
+        lifecycleScope.launch {
+            try {
+                val assignmentRepository = (application as BerryHarvestApplication)
+                    .repositoryProvider.assignmentRepository
+
+                val rowNumbers = assignmentRepository.getAllRowNumbers()
+                Log.d("MainActivity", "Found ${rowNumbers.size} rows to delete")
+
+                // Delete each row's assignments
+                var success = true
+                for (rowNumber in rowNumbers) {
+                    Log.d("MainActivity", "Deleting row $rowNumber")
+                    val result = assignmentRepository.deleteByRow(rowNumber)
+                    if (result !is com.example.berryharvest.data.repository.Result.Success) {
+                        success = false
+                        Log.e("MainActivity", "Failed to delete row $rowNumber: $result")
+                    } else {
+                        Log.d("MainActivity", "Successfully deleted row $rowNumber")
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    progressDialog.dismiss()
+
+                    if (success) {
+                        Toast.makeText(this@MainActivity,
+                            "Всі призначення видалено", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this@MainActivity,
+                            "Виникли помилки при видаленні призначень", Toast.LENGTH_SHORT).show()
+                    }
+
+                    // Proceed to next step
+                    showPunnetPriceUpdateDialog()
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error deleting assignments", e)
+
+                withContext(Dispatchers.Main) {
+                    progressDialog.dismiss()
+                    Toast.makeText(this@MainActivity,
+                        "Помилка: ${e.message}", Toast.LENGTH_SHORT).show()
+
+                    // Still proceed to next step
+                    showPunnetPriceUpdateDialog()
+                }
+            }
+        }
+    }
+
+
+    private fun showPunnetPriceUpdateDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_edit_price, null)
+        val priceEditText = dialogView.findViewById<EditText>(R.id.priceEditText)
+
+        lifecycleScope.launch {
+            try {
+                val settingsRepository = (application as BerryHarvestApplication).repositoryProvider.settingsRepository
+                val currentPrice = settingsRepository.getPunnetPrice()
+
+                withContext(Dispatchers.Main) {
+                    priceEditText.setText(String.format(Locale.getDefault(), "%.2f", currentPrice))
+
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Ціна пінетки")
+                        .setMessage("Встановіть ціну пінетки на новий робочий день:")
+                        .setView(dialogView)
+                        .setPositiveButton("Зберегти") { _, _ ->
+                            val priceText = priceEditText.text.toString().replace(",", ".")
+                            val newPrice = priceText.toFloatOrNull()
+
+                            if (newPrice == null) {
+                                Toast.makeText(this@MainActivity, "Невірний формат ціни", Toast.LENGTH_SHORT).show()
+                                return@setPositiveButton
+                            }
+
+                            if (newPrice != currentPrice) {
+                                showPriceConfirmationDialog(newPrice)
+                            } else {
+                                showWorkdaySuccessDialog()
+                            }
+                        }
+                        .setNegativeButton("Залишити поточну") { _, _ ->
+                            showWorkdaySuccessDialog()
+                        }
+                        .show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Помилка отримання ціни: ${e.message}", Toast.LENGTH_SHORT).show()
+                    showWorkdaySuccessDialog()
+                }
+            }
+        }
+    }
+
+    private fun showPriceConfirmationDialog(newPrice: Float) {
+        AlertDialog.Builder(this)
+            .setTitle("Підтвердження зміни ціни")
+            .setMessage("Ви впевнені, що хочете змінити ціну пінетки на ${String.format(Locale.getDefault(), "%.2f", newPrice)}₴?")
+            .setPositiveButton("Так") { _, _ ->
+                // Update price in repository
+                lifecycleScope.launch {
+                    try {
+                        val settingsRepository = (application as BerryHarvestApplication).repositoryProvider.settingsRepository
+                        settingsRepository.updatePunnetPrice(newPrice)
+
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@MainActivity, "Ціну оновлено", Toast.LENGTH_SHORT).show()
+                            showWorkdaySuccessDialog()
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@MainActivity, "Помилка оновлення ціни: ${e.message}", Toast.LENGTH_SHORT).show()
+                            showWorkdaySuccessDialog()
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("Ні") { _, _ ->
+                showWorkdaySuccessDialog()
+            }
+            .show()
+    }
+
+    private fun showWorkdaySuccessDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Успіх")
+            .setMessage("Новий робочий день розпочато!")
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
     override fun onSupportNavigateUp(): Boolean {
         val navController = findNavController(R.id.nav_host_fragment_content_main)
         return navController.navigateUp(appBarConfiguration) || super.onSupportNavigateUp()
     }
 
 
+    @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
 

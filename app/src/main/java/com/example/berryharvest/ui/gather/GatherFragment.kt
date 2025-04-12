@@ -20,7 +20,7 @@ import java.util.Locale
 
 class GatherFragment : Fragment() {
     private lateinit var viewModel: GatherViewModel
-    private lateinit var punnetPriceEditText: EditText
+    private lateinit var punnetPriceTextView: TextView
 
     // Создаем новый способ обработки результатов сканирования
     private val scannerLauncher = registerForActivityResult(
@@ -46,6 +46,9 @@ class GatherFragment : Fragment() {
     ): View? {
         val view = inflater.inflate(R.layout.fragment_gather, container, false)
         viewModel = ViewModelProvider(this).get(GatherViewModel::class.java)
+        punnetPriceTextView = view.findViewById(R.id.punnetPriceTextView)
+
+        setupPriceTextView()
 
         //setupViews(view)
         setupObservers()
@@ -75,104 +78,71 @@ class GatherFragment : Fragment() {
             }
         }
 
-//        viewModel.punnetPrice.observe(viewLifecycleOwner) { price ->
-//            updatePriceDisplay(price)
-//        }
-    }
-
-//    private fun setupViews(view: View) {
-//        punnetPriceEditText = view.findViewById(R.id.punnetPriceEditText)
-//
-//        val myButton: Button = view.findViewById(R.id.button)
-//        myButton.setOnClickListener { initQRCodeScanner() }
-//
-//        // Обработчик нажатия кнопки Done на клавиатуре
-//        punnetPriceEditText.setOnEditorActionListener { _, actionId, _ ->
-//            if (actionId == EditorInfo.IME_ACTION_DONE) {
-//                val imm = requireContext().getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-//                imm.hideSoftInputFromWindow(punnetPriceEditText.windowToken, 0)
-//                handlePriceChange()
-//                true
-//            } else {
-//                false
-//            }
-//        }
-//
-//        // Обработчик потери фокуса
-//        punnetPriceEditText.setOnFocusChangeListener { _, hasFocus ->
-//            if (!hasFocus) {
-//                handlePriceChange()
-//            }
-//        }
-//    }
-
-    private fun handlePriceChange() {
-        // Отложенная обработка для предотвращения множественных вызовов
-        punnetPriceEditText.removeCallbacks(priceChangeRunnable)
-        punnetPriceEditText.postDelayed(priceChangeRunnable, 300)
-    }
-
-    private val priceChangeRunnable = Runnable {
-        val priceText = punnetPriceEditText.text.toString().replace(",", ".")
-        val newPrice = priceText.toFloatOrNull()
-
-        if (priceText.isBlank()) {
-            updatePriceDisplay(viewModel.punnetPrice.value ?: 0f)
-            return@Runnable
-        }
-
-        if (newPrice == null) {
-            Toast.makeText(activity, "Невірний формат ціни", Toast.LENGTH_SHORT).show()
-            updatePriceDisplay(viewModel.punnetPrice.value ?: 0f)
-            return@Runnable
-        }
-
-        if (newPrice != viewModel.punnetPrice.value) {
-            showPriceChangeConfirmationDialog(newPrice)
+        viewModel.punnetPrice.observe(viewLifecycleOwner) { price ->
+            updatePriceDisplay(price)
         }
     }
 
-    private fun showPriceChangeConfirmationDialog(newPrice: Float) {
+    private fun setupPriceTextView() {
+        punnetPriceTextView.setOnLongClickListener {
+            showPriceChangeMenu()
+            true
+        }
+    }
+
+    private fun showPriceChangeMenu() {
         AlertDialog.Builder(requireContext())
             .setTitle("Зміна ціни")
-            .setMessage("Ви впевнені що бажаєте змінити вартість пінетки?")
+            .setMessage("Бажаєте змінити вартість пінетки?")
+            .setPositiveButton("Так") { _, _ ->
+                showPriceEditDialog()
+            }
+            .setNegativeButton("Ні", null)
+            .show()
+    }
+
+    private fun showPriceEditDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_edit_price, null)
+        val priceEditText = dialogView.findViewById<EditText>(R.id.priceEditText)
+
+        // Set current price
+        val currentPrice = viewModel.punnetPrice.value ?: 0f
+        priceEditText.setText(String.format(Locale.getDefault(), "%.2f", currentPrice))
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("Введіть нову ціну")
+            .setView(dialogView)
+            .setPositiveButton("Зберегти") { _, _ ->
+                val priceText = priceEditText.text.toString().replace(",", ".")
+                val newPrice = priceText.toFloatOrNull()
+
+                if (newPrice == null) {
+                    Toast.makeText(requireContext(), "Невірний формат ціни", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+
+                if (newPrice != currentPrice) {
+                    showPriceConfirmationDialog(newPrice)
+                }
+            }
+            .setNegativeButton("Скасувати", null)
+            .show()
+    }
+
+    private fun showPriceConfirmationDialog(newPrice: Float) {
+        AlertDialog.Builder(requireContext())
+            .setTitle("Підтвердження")
+            .setMessage("Ви впевнені, що хочете змінити ціну на ${String.format(Locale.getDefault(), "%.2f", newPrice)}₴?")
             .setPositiveButton("Так") { _, _ ->
                 viewModel.updatePunnetPrice(newPrice)
+                Toast.makeText(requireContext(), "Ціну оновлено", Toast.LENGTH_SHORT).show()
             }
-            .setNegativeButton("Ні") { _, _ ->
-                updatePriceDisplay(viewModel.punnetPrice.value ?: 0f)
-            }
+            .setNegativeButton("Ні", null)
             .show()
     }
 
     private fun updatePriceDisplay(price: Float) {
-        punnetPriceEditText.setText(String.format(Locale.getDefault(), "%.2f", price).replace(".", ","))
-    }
-
-    private fun initQRCodeScanner() {
-        // Используем новый подход для запуска сканера
-        val integrator = IntentIntegrator.forSupportFragment(this)
-            .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
-            .setOrientationLocked(true)
-            .setPrompt("Проскануйте код")
-            .setBeepEnabled(true)
-
-        // Запускаем сканирование через новый лаунчер вместо старого метода
-        scannerLauncher.launch(integrator.createScanIntent())
-    }
-
-    // Устаревший метод - оставим его для обратной совместимости, но он делегирует
-    // обработку результата новому подходу
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        val result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data)
-        result?.let {
-            if (result.contents == null) {
-                Toast.makeText(activity, "Сканування припинено", Toast.LENGTH_LONG).show()
-            } else {
-                viewModel.handleScanResult(result.contents)
-            }
-        } ?: super.onActivityResult(requestCode, resultCode, data)
+        punnetPriceTextView.text = String.format(Locale.getDefault(), "%.2f", price)
     }
 
     @SuppressLint("SetTextI18n")

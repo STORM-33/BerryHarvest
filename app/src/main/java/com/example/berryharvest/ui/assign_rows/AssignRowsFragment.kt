@@ -1,6 +1,5 @@
 package com.example.berryharvest.ui.assign_rows
 
-import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.os.Bundle
 import android.util.Log
@@ -14,7 +13,6 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.berryharvest.BerryHarvestApplication
 import com.example.berryharvest.R
 import com.example.berryharvest.data.model.Assignment
-import com.example.berryharvest.data.repository.ConnectionState
 import com.example.berryharvest.data.model.Worker
 import com.example.berryharvest.ui.common.SearchableSpinnerView
 import com.example.berryharvest.ui.common.WorkerSearchableItem
@@ -34,7 +32,6 @@ class AssignRowsFragment : Fragment() {
     private lateinit var assignButton: Button
     private lateinit var assignmentsRecyclerView: RecyclerView
     private lateinit var loadingProgressBar: ProgressBar
-    private lateinit var clearAllRowsButton: Button
 
     private var selectedWorker: Worker? = null
     private lateinit var assignmentAdapter: AssignmentAdapter
@@ -52,56 +49,12 @@ class AssignRowsFragment : Fragment() {
         assignButton = view.findViewById(R.id.assignButton)
         assignmentsRecyclerView = view.findViewById(R.id.assignmentsRecyclerView)
         loadingProgressBar = view.findViewById(R.id.loadingProgressBar)
-        clearAllRowsButton = view.findViewById(R.id.clearAllRowsButton)
 
         setupUI()
         setupWorkerSearch()
         observeViewModel()
 
-        // Set up clear all rows button
-        clearAllRowsButton.setOnClickListener {
-            showClearAllRowsConfirmation()
-        }
-
         return view
-    }
-
-    private fun showClearAllRowsConfirmation() {
-        AlertDialog.Builder(requireContext())
-            .setTitle("Видалити всі ряди")
-            .setMessage("Ви впевнені, що бажаєте видалити ВСІ ряди? Цю дію неможливо скасувати.")
-            .setPositiveButton("Так") { _, _ ->
-                // Show loading
-                loadingProgressBar.visibility = View.VISIBLE
-
-                viewLifecycleOwner.lifecycleScope.launch {
-                    try {
-                        val result = viewModel.deleteAllRows()
-                        withContext(Dispatchers.Main) {
-                            loadingProgressBar.visibility = View.GONE
-                            when (result) {
-                                is com.example.berryharvest.data.repository.Result.Success -> {
-                                    Toast.makeText(context, "Всі ряди видалено", Toast.LENGTH_SHORT).show()
-                                }
-                                is com.example.berryharvest.data.repository.Result.Error -> {
-                                    Toast.makeText(context, "Помилка видалення рядів: ${result.message}", Toast.LENGTH_SHORT).show()
-                                }
-                                is com.example.berryharvest.data.repository.Result.Loading -> {
-                                    // This shouldn't happen but handle it for completeness
-                                    Toast.makeText(context, "Операція в процесі...", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        withContext(Dispatchers.Main) {
-                            loadingProgressBar.visibility = View.GONE
-                            Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-            }
-            .setNegativeButton("Ні", null)
-            .show()
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -111,6 +64,20 @@ class AssignRowsFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewModel.loadInitialData()
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        workerSearchView.hideDropdownForced()
+        // Clear selection when pausing fragment
+        selectedWorker = null
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Reset the searchable spinner completely
+        workerSearchView.clearSelection()
+        selectedWorker = null
     }
 
     private fun setupUI() {
@@ -279,7 +246,6 @@ class AssignRowsFragment : Fragment() {
 
                         if (savedAssignment != null) {
                             Toast.makeText(requireContext(), "Працівника призначено на ряд $finalRowNumber", Toast.LENGTH_SHORT).show()
-                            rowEditText.text.clear()
                             workerSearchView.clearSelection()
                             selectedWorker = null
                         } else {

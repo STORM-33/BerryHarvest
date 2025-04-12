@@ -362,6 +362,19 @@ class AssignmentRepository(
         }
     }
 
+    suspend fun getAllRowNumbers(): List<Int> {
+        return try {
+            val realm = getRealm()
+            val assignments = realm.query<Assignment>().find()
+            val rowNumbers = assignments.map { it.rowNumber }.distinct()
+            Log.d(TAG, "Found ${rowNumbers.size} distinct row numbers")
+            rowNumbers
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting row numbers", e)
+            emptyList()
+        }
+    }
+
     override fun close() {
         _realm?.close()
         _realm = null

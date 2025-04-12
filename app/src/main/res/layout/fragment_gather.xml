@@ -16,15 +16,14 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
-    <EditText
-        android:id="@+id/punnetPriceEditText"
-        android:layout_width="100dp"
+    <TextView
+        android:id="@+id/punnetPriceTextView"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="16dp"
-        android:inputType="numberDecimal"
-        android:maxLength="6"
-        android:imeOptions="actionDone"
-        android:gravity="end"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:longClickable="true"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/punnetPriceLabel" />
 
@@ -32,11 +31,11 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="₴"
-        android:textSize="16sp"
+        android:textSize="18sp"
         android:layout_marginStart="4dp"
-        app:layout_constraintStart_toEndOf="@id/punnetPriceEditText"
-        app:layout_constraintTop_toTopOf="@id/punnetPriceEditText"
-        app:layout_constraintBottom_toBottomOf="@id/punnetPriceEditText" />
+        app:layout_constraintStart_toEndOf="@id/punnetPriceTextView"
+        app:layout_constraintTop_toTopOf="@id/punnetPriceTextView"
+        app:layout_constraintBottom_toBottomOf="@id/punnetPriceTextView" />
 
     <Button
         android:id="@+id/button"

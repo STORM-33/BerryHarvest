@@ -28,12 +28,26 @@ class NetworkConnectivityManager(private val context: Context) {
     }
 
     fun isNetworkAvailable(): Boolean {
-        val network = connectivityManager.activeNetwork
-        val capabilities = connectivityManager.getNetworkCapabilities(network)
-        val isAvailable = capabilities != null && (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))
-        Log.d("Network", "Network available: $isAvailable")
-        return isAvailable
+        try {
+            val network = connectivityManager.activeNetwork
+            if (network == null) {
+                Log.d("Network", "No active network")
+                return false
+            }
+
+            val capabilities = connectivityManager.getNetworkCapabilities(network)
+            val isAvailable = capabilities != null && (
+                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+                    )
+
+            Log.d("Network", "Network available: $isAvailable")
+            return isAvailable
+        } catch (e: Exception) {
+            Log.e("Network", "Error checking network availability", e)
+            return false
+        }
     }
 
     private fun updateConnectionState() {
@@ -82,5 +96,21 @@ class NetworkConnectivityManager(private val context: Context) {
             }
         }
         networkCallback = null
+    }
+
+    fun getConnectionStateForDisplay(): String {
+        return when (val state = _connectionState.value) {
+            is ConnectionState.Connected -> "Підключено"
+            is ConnectionState.Disconnected -> "Офлайн режим"
+            is ConnectionState.Error -> "Помилка: ${state.message}"
+        }
+    }
+
+    fun getConnectionStateColor(context: Context): Int {
+        return when (_connectionState.value) {
+            is ConnectionState.Connected -> context.getColor(android.R.color.holo_green_dark)
+            is ConnectionState.Disconnected -> context.getColor(android.R.color.holo_orange_dark)
+            is ConnectionState.Error -> context.getColor(android.R.color.holo_red_dark)
+        }
     }
 }
