@@ -14,4 +14,5 @@
     <string name="berry_harvest">Berry Harvest</string>
     <string name="offline_mode">оффлайн</string>
     <string name="online_mode">онлайн</string>
+    <string name="menu_payment">Оплата</string>
 </resources>

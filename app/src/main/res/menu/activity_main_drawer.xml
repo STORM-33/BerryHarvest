@@ -17,6 +17,10 @@
             android:icon="@drawable/ic_menu_workers_registration"
             android:title="@string/menu_workers_registration" />
         <item
+            android:id="@+id/nav_payment"
+            android:icon="@drawable/ic_menu_payment"
+            android:title="@string/menu_payment" />
+        <item
             android:id="@+id/nav_report"
             android:icon="@drawable/ic_menu_report"
             android:title="@string/menu_report" />

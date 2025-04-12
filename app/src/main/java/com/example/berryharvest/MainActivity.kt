@@ -63,6 +63,11 @@ class MainActivity : AppCompatActivity() {
         navView.setupWithNavController(navController)
 
         initializeRealm()
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            (application as BerryHarvestApplication).ensureSubscriptions()
+        }
+
         setupNetworkStatusIndicator()
         setupNetworkSynchronization()
     }

@@ -8,6 +8,8 @@ import com.example.berryharvest.data.repository.RepositoryProvider
 import com.example.berryharvest.data.model.Worker
 import com.example.berryharvest.data.model.Assignment
 import com.example.berryharvest.data.model.Gather
+import com.example.berryharvest.data.model.PaymentBalance
+import com.example.berryharvest.data.model.PaymentRecord
 import com.example.berryharvest.data.model.Settings
 import com.example.berryharvest.data.sync.SyncManager
 import io.realm.kotlin.MutableRealm
@@ -17,6 +19,7 @@ import io.realm.kotlin.ext.query
 import io.realm.kotlin.mongodb.App
 import io.realm.kotlin.mongodb.AppConfiguration
 import io.realm.kotlin.mongodb.Credentials
+import io.realm.kotlin.mongodb.subscriptions
 import io.realm.kotlin.mongodb.sync.SyncConfiguration
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -81,7 +84,8 @@ class BerryHarvestApplication : Application() {
                 if (forceOfflineMode || networkStatusManager.isNetworkAvailable() == false) {
                     Log.d("Realm", "Network unavailable, creating local Realm")
                     val config = RealmConfiguration.Builder(
-                        setOf(Worker::class, Gather::class, Assignment::class, Settings::class)
+                        setOf(Worker::class, Gather::class, Assignment::class, Settings::class,
+                            PaymentRecord::class, PaymentBalance::class) // Add these two new models
                     )
                         .schemaVersion(1)
                         .directory("local_realm")
@@ -106,15 +110,18 @@ class BerryHarvestApplication : Application() {
                 // Configure sync with reduced initial data download time
                 val config = SyncConfiguration.Builder(
                     user,
-                    setOf(Worker::class, Gather::class, Assignment::class, Settings::class)
+                    setOf(Worker::class, Gather::class, Assignment::class, Settings::class,
+                        PaymentRecord::class, PaymentBalance::class)
                 )
                     .schemaVersion(1)
                     .initialSubscriptions { realm ->
-                        // Keep subscriptions minimal
-                        add(realm.query<Worker>())
-                        add(realm.query<Gather>())
-                        add(realm.query<Assignment>())
-                        add(realm.query<Settings>())
+                        // Keep subscriptions minimal but with named subscriptions
+                        add(realm.query<Worker>(), "workers")
+                        add(realm.query<Gather>(), "gathers")
+                        add(realm.query<Assignment>(), "assignments")
+                        add(realm.query<Settings>(), "settings")
+                        add(realm.query<PaymentRecord>(), "payment_records")
+                        add(realm.query<PaymentBalance>(), "payment_balances")
                     }
                     .waitForInitialRemoteData(1.seconds) // Reduced from default to 1 second max
                     .build()
@@ -132,7 +139,8 @@ class BerryHarvestApplication : Application() {
                     // Fallback to local if sync fails
                     Log.d("Realm", "Falling back to local Realm")
                     val localConfig = RealmConfiguration.Builder(
-                        setOf(Worker::class, Gather::class, Assignment::class, Settings::class)
+                        setOf(Worker::class, Gather::class, Assignment::class, Settings::class,
+                            PaymentRecord::class, PaymentBalance::class) // Add these two new models
                     )
                         .schemaVersion(1)
                         .directory("local_fallback")
@@ -151,7 +159,8 @@ class BerryHarvestApplication : Application() {
             try {
                 Log.d("Realm", "Final fallback to basic local Realm")
                 val config = RealmConfiguration.Builder(
-                    setOf(Worker::class, Gather::class, Assignment::class, Settings::class)
+                    setOf(Worker::class, Gather::class, Assignment::class, Settings::class,
+                        PaymentRecord::class, PaymentBalance::class) // Add these two new models
                 )
                     .schemaVersion(1)
                     .inMemory() // Use in-memory as last resort to avoid any disk issues
@@ -167,6 +176,66 @@ class BerryHarvestApplication : Application() {
             }
         }
     }
+
+    suspend fun ensureSubscriptions() {
+        try {
+            val realm = getRealmInstance()
+
+            // Check if this is a synced realm
+            if (realm.configuration.toString().contains("Sync")) {
+                Log.d("Realm", "Checking subscriptions on synced Realm")
+
+                realm.subscriptions.waitForSynchronization()
+
+                // Check existing subscriptions
+                val subscriptionNames = mutableSetOf<String>()
+                realm.subscriptions.forEach { subscription ->
+                    subscriptionNames.add(subscription.name ?: "unnamed")
+                }
+
+                // Log found subscriptions
+                Log.d("Realm", "Found subscriptions: ${subscriptionNames.joinToString()}")
+
+                // Update subscriptions if needed
+                realm.subscriptions.update {
+                    if (!subscriptionNames.contains("workers")) {
+                        add(realm.query<Worker>(), "workers")
+                        Log.d("Realm", "Added missing 'workers' subscription")
+                    }
+
+                    if (!subscriptionNames.contains("gathers")) {
+                        add(realm.query<Gather>(), "gathers")
+                        Log.d("Realm", "Added missing 'gathers' subscription")
+                    }
+
+                    if (!subscriptionNames.contains("assignments")) {
+                        add(realm.query<Assignment>(), "assignments")
+                        Log.d("Realm", "Added missing 'assignments' subscription")
+                    }
+
+                    if (!subscriptionNames.contains("settings")) {
+                        add(realm.query<Settings>(), "settings")
+                        Log.d("Realm", "Added missing 'settings' subscription")
+                    }
+
+                    if (!subscriptionNames.contains("payment_records")) {
+                        add(realm.query<PaymentRecord>(), "payment_records")
+                        Log.d("Realm", "Added missing 'payment_records' subscription")
+                    }
+
+                    if (!subscriptionNames.contains("payment_balances")) {
+                        add(realm.query<PaymentBalance>(), "payment_balances")
+                        Log.d("Realm", "Added missing 'payment_balances' subscription")
+                    }
+                }
+            } else {
+                Log.d("Realm", "Not a synced Realm, no need to check subscriptions")
+            }
+        } catch (e: Exception) {
+            Log.e("Realm", "Error ensuring subscriptions", e)
+        }
+    }
+
 
     suspend fun <T> safeWriteTransaction(block: MutableRealm.() -> T): T {
         val realm = runBlocking { getRealmInstance() }

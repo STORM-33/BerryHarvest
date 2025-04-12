@@ -115,11 +115,15 @@ class SyncManager(
                 // Sync settings
                 val settingsResult = repositories.settingsRepository.syncPendingChanges()
 
+                // Sync payments - add this line
+                val paymentResult = repositories.paymentRepository.syncPendingChanges()
+
                 // Check results
                 val allSuccessful =
                     workerResult is Result.Success &&
                             assignmentResult is Result.Success &&
-                            settingsResult is Result.Success
+                            settingsResult is Result.Success &&
+                            paymentResult is Result.Success // Add payment result check
 
                 if (allSuccessful) {
                     Log.d(TAG, "Sync completed successfully")
@@ -128,7 +132,8 @@ class SyncManager(
                     val errors = listOfNotNull(
                         (workerResult as? Result.Error)?.message,
                         (assignmentResult as? Result.Error)?.message,
-                        (settingsResult as? Result.Error)?.message
+                        (settingsResult as? Result.Error)?.message,
+                        (paymentResult as? Result.Error)?.message // Add payment error
                     ).joinToString("; ")
 
                     Log.e(TAG, "Sync completed with errors: $errors")
@@ -160,7 +165,8 @@ class SyncManager(
 
         return repositories.workerRepository.hasPendingOperations() ||
                 repositories.assignmentRepository.hasPendingOperations() ||
-                repositories.settingsRepository.hasPendingOperations()
+                repositories.settingsRepository.hasPendingOperations() ||
+                repositories.paymentRepository.hasPendingOperations() // Add payment repository check
     }
 
     fun getPendingChangesCount(): Int {
@@ -168,6 +174,7 @@ class SyncManager(
 
         return repositories.workerRepository.getPendingOperationsCount() +
                 repositories.assignmentRepository.getPendingOperationsCount() +
-                repositories.settingsRepository.getPendingOperationsCount()
+                repositories.settingsRepository.getPendingOperationsCount() +
+                repositories.paymentRepository.getPendingOperationsCount() // Add payment repository count
     }
 }

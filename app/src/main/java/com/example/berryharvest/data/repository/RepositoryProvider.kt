@@ -24,6 +24,11 @@ class RepositoryProvider(private val application: Application) {
         SettingsRepository(application, networkManager)
     }
 
+    // Add the new payment repository
+    val paymentRepository: PaymentRepository by lazy {
+        PaymentRepositoryImpl(application, networkManager)
+    }
+
     /**
      * Close all repositories and release resources.
      * Call this method when the application is shutting down.
@@ -32,5 +37,6 @@ class RepositoryProvider(private val application: Application) {
         workerRepository.close()
         assignmentRepository.close()
         settingsRepository.close()
+        paymentRepository.close() // Add closing the payment repository
     }
 }
