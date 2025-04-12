@@ -62,7 +62,7 @@
                 android:layout_marginBottom="8dp"
                 android:background="#DDDDDD" />
 
-            <!-- Balance Row -->
+            <!-- Total Earnings Row -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -72,7 +72,31 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Поточний баланс:"
+                    android:text="Загальний заробіток:"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:id="@+id/earningsTextView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="16sp"
+                    android:textColor="#4CAF50"
+                    android:textStyle="bold"
+                    tools:text="1250.50₴" />
+            </LinearLayout>
+
+            <!-- Balance Row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Залишок до оплати:"
                     android:textSize="16sp" />
 
                 <TextView

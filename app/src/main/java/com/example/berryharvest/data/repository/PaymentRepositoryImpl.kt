@@ -106,43 +106,106 @@ class PaymentRepositoryImpl(
             Log.d(TAG, "Getting balance for worker: $workerId")
             val realm = getRealm()
 
-            // First try to get from PaymentRecord calculations to avoid creating PaymentBalance if not needed
+            // First get all the payment records
             val payments = realm.query<PaymentRecord>("workerId == $0 AND isDeleted == false", workerId).find()
-            val totalAmount = payments.sumOf { it.amount.toDouble() }.toFloat()
+            val totalPayments = payments.sumOf { it.amount.toDouble() }.toFloat()
+            Log.d(TAG, "Total payments: $totalPayments")
 
-            // Try to find existing balance
+            // Next, calculate earnings from gather records - ONLY count non-deleted records
+            val gathers = realm.query<Gather>("workerId == $0", workerId).find()
+                .filter { it.isDeleted != true } // Explicitly check for not true to handle null
+            var totalEarnings = 0.0f
+
+            for (gather in gathers) {
+                val punnets = gather.numOfPunnets ?: 0
+                val punnetCost = gather.punnetCost ?: 0.0f
+                val earnings = punnets * punnetCost
+                totalEarnings += earnings
+                Log.d(TAG, "Gather: $punnets punnets at $punnetCost each = $earnings")
+            }
+
+            Log.d(TAG, "Total earnings from gathers: $totalEarnings")
+
+            // The actual balance is earnings minus payments
+            // (since positive payments mean money paid OUT to worker)
+            val actualBalance = totalEarnings - totalPayments
+            Log.d(TAG, "Actual balance (earnings - payments): $actualBalance")
+
+            // Try to find existing balance record
             val balance = realm.query<PaymentBalance>("workerId == $0", workerId).first().find()
 
             if (balance != null) {
                 // If the calculated amount differs from stored balance, update it
-                if (balance.currentBalance != totalAmount) {
+                if (balance.currentBalance != actualBalance) {
                     try {
                         app.safeWriteTransaction {
                             val liveBalance = query<PaymentBalance>("_id == $0", balance._id).first().find()
                             liveBalance?.apply {
-                                currentBalance = totalAmount
+                                currentBalance = actualBalance
                                 lastUpdated = System.currentTimeMillis()
                                 isSynced = networkManager.isNetworkAvailable()
                             }
                         }
                     } catch (e: Exception) {
-                        // Just log the error but don't fail - we can still return the calculated amount
                         Log.e(TAG, "Error updating existing balance", e)
                     }
                 }
 
-                Log.d(TAG, "Using existing balance record: ${balance.currentBalance}")
-                return Result.Success(balance.currentBalance)
+                Log.d(TAG, "Using updated balance record: $actualBalance")
+                return Result.Success(actualBalance)
             }
 
-            // If no balance exists, use the calculated amount but don't try to create a balance record yet
-            // Wait until next payment operation to create it
+            // If no balance exists, use the calculated amount
+            Log.d(TAG, "Calculated balance (no record exists): $actualBalance")
 
-            Log.d(TAG, "Calculated balance (no record exists): $totalAmount")
-            Result.Success(totalAmount)
+            // Attempt to create a balance record
+            try {
+                app.safeWriteTransaction {
+                    copyToRealm(PaymentBalance().apply {
+                        _id = UUID.randomUUID().toString()
+                        this.workerId = workerId
+                        currentBalance = actualBalance
+                        lastUpdated = System.currentTimeMillis()
+                        isSynced = networkManager.isNetworkAvailable()
+                    })
+                }
+                Log.d(TAG, "Created new balance record")
+            } catch (e: Exception) {
+                // Just log the error but don't fail
+                Log.e(TAG, "Failed to create balance record", e)
+            }
+
+            Result.Success(actualBalance)
         } catch (e: Exception) {
             Log.e(TAG, "Error getting worker balance", e)
             _errorState.value = "Failed to get worker balance: ${e.message}"
+            Result.Error(e)
+        }
+    }
+
+    override suspend fun getWorkerEarnings(workerId: String): Result<Float> {
+        return try {
+            Log.d(TAG, "Getting total earnings for worker: $workerId")
+            val realm = getRealm()
+
+            // Only count non-deleted gathers
+            val gathers = realm.query<Gather>("workerId == $0", workerId).find()
+                .filter { it.isDeleted != true } // Explicitly check for not true to handle null
+
+            var totalEarnings = 0.0f
+            for (gather in gathers) {
+                val punnets = gather.numOfPunnets ?: 0
+                val punnetCost = gather.punnetCost ?: 0.0f
+                val earnings = punnets * punnetCost
+                totalEarnings += earnings
+                Log.d(TAG, "Gather added to earnings: $punnets punnets at $punnetCost each = $earnings")
+            }
+
+            Log.d(TAG, "Total earnings from gathers: $totalEarnings")
+            Result.Success(totalEarnings)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting worker earnings", e)
+            _errorState.value = "Failed to get worker earnings: ${e.message}"
             Result.Error(e)
         }
     }
@@ -160,19 +223,41 @@ class PaymentRepositoryImpl(
             calendar.set(Calendar.MILLISECOND, 0)
             val startOfDay = calendar.timeInMillis
 
-            // Query gathers from today for this worker
-            val gathers = realm.query<Gather>("workerId == $0", workerId).find()
-                .filter { it.dateTime?.let { dateStr ->
-                    try {
-                        (SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                            .parse(dateStr)?.time ?: 0) >= startOfDay
-                    } catch (e: Exception) {
+            // Used for date parsing
+            val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+
+            // Query gathers from today for this worker - only non-deleted records
+            val allGathers = realm.query<Gather>("workerId == $0", workerId).find()
+                .filter { it.isDeleted != true } // Skip deleted gathers
+
+            Log.d(TAG, "Found ${allGathers.size} total gathers for worker (non-deleted)")
+
+            // Filter gathers from today with safer date parsing
+            val todayGathers = allGathers.filter { gather ->
+                try {
+                    val dateStr = gather.dateTime
+                    if (dateStr != null) {
+                        val gatherDate = try {
+                            dateFormat.parse(dateStr)?.time ?: 0
+                        } catch (e: Exception) {
+                            // If date parsing fails, log but don't crash
+                            Log.e(TAG, "Error parsing date: $dateStr", e)
+                            0L
+                        }
+                        gatherDate >= startOfDay
+                    } else {
                         false
                     }
-                } ?: false }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error filtering gather by date", e)
+                    false
+                }
+            }
 
-            // Sum up punnets
-            val todayCount = gathers.sumOf { it.numOfPunnets?.toInt() ?: 0 }
+            Log.d(TAG, "Filtered to ${todayGathers.size} gathers from today")
+
+            // Sum up punnets - safely handle null values
+            val todayCount = todayGathers.sumOf { it.numOfPunnets?.toInt() ?: 0 }
             Log.d(TAG, "Today's punnet count: $todayCount")
 
             Result.Success(todayCount)

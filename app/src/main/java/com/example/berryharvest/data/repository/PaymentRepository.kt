@@ -10,6 +10,9 @@ interface PaymentRepository : BaseRepository<PaymentRecord> {
     // Get current balance for a worker
     suspend fun getWorkerBalance(workerId: String): Result<Float>
 
+    // Get total earnings for a worker (add this method)
+    suspend fun getWorkerEarnings(workerId: String): Result<Float>
+
     // Record a new payment
     suspend fun recordPayment(workerId: String, amount: Float, notes: String): Result<String>
 

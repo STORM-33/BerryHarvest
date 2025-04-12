@@ -20,6 +20,7 @@ import com.example.berryharvest.data.model.Worker
 import com.example.berryharvest.ui.common.SearchableSpinnerView
 import com.example.berryharvest.ui.common.WorkerSearchableItem
 import com.example.berryharvest.ui.common.toSearchableItem
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -39,6 +40,7 @@ class PaymentFragment : Fragment() {
     private lateinit var paymentHistoryRecyclerView: RecyclerView
     private lateinit var loadingProgressBar: ProgressBar
     private lateinit var emptyStateTextView: TextView
+    private lateinit var earningsTextView: TextView
 
     private lateinit var paymentAdapter: PaymentAdapter
 
@@ -64,6 +66,7 @@ class PaymentFragment : Fragment() {
         paymentHistoryRecyclerView = root.findViewById(R.id.paymentHistoryRecyclerView)
         loadingProgressBar = root.findViewById(R.id.loadingProgressBar)
         emptyStateTextView = root.findViewById(R.id.emptyStateTextView)
+        earningsTextView = root.findViewById(R.id.earningsTextView)
 
         // Set up RecyclerView
         paymentAdapter = PaymentAdapter()
@@ -123,6 +126,10 @@ class PaymentFragment : Fragment() {
             viewModel.selectedWorker.collect { worker ->
                 worker?.let {
                     showWorkerInfo(it)
+                    // Delay slightly to allow all data to load
+                    delay(500)
+                    // Check for balance discrepancies
+                    viewModel.checkBalanceDiscrepancy()
                 } ?: hideWorkerInfo()
             }
         }
@@ -182,6 +189,16 @@ class PaymentFragment : Fragment() {
                 }
             }
         }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.workerEarnings.collect { earnings ->
+                updateEarningsDisplay(earnings)
+            }
+        }
+    }
+
+    private fun updateEarningsDisplay(earnings: Float) {
+        earningsTextView.text = String.format(Locale.getDefault(), "%.2f₴", earnings)
     }
 
     private fun showWorkerInfo(worker: Worker) {
@@ -245,31 +262,36 @@ class PaymentFragment : Fragment() {
         val dialog = AlertDialog.Builder(requireContext())
             .setTitle("Часткова оплата")
             .setView(dialogView)
-            .setPositiveButton("Оплатити") { _, _ ->
-                val amountText = amountEditText.text.toString()
-                val notes = notesEditText.text.toString()
-
-                val amount = amountText.toFloatOrNull()
-                if (amount == null) {
-                    Toast.makeText(context, "Введіть коректну суму", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-
-                if (amount <= 0) {
-                    Toast.makeText(context, "Сума повинна бути більше нуля", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-
-                if (amount > balance) {
-                    Toast.makeText(context, "Сума не може перевищувати поточний баланс", Toast.LENGTH_LONG).show()
-                    return@setPositiveButton
-                }
-
-                viewModel.makePartialPayment(amount, notes)
-            }
+            .setPositiveButton("Оплатити", null) // Set to null initially to prevent auto-dismiss
             .setNegativeButton("Скасувати", null)
             .create()
 
         dialog.show()
+
+        // Override the click listener to prevent dialog from closing on error
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val amountText = amountEditText.text.toString().replace(",", ".")
+            val notes = notesEditText.text.toString()
+
+            val amount = amountText.toFloatOrNull()
+            if (amount == null) {
+                Toast.makeText(context, "Введіть коректну суму", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (amount <= 0) {
+                Toast.makeText(context, "Сума повинна бути більше нуля", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (amount > balance) {
+                Toast.makeText(context, "Сума не може перевищувати поточний баланс", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
+
+            // All validation passed, dismiss dialog and make payment
+            dialog.dismiss()
+            viewModel.makePartialPayment(amount, notes)
+        }
     }
 }

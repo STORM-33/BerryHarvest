@@ -42,6 +42,9 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
     private val _paymentHistory = MutableStateFlow<List<PaymentRecord>>(emptyList())
     val paymentHistory: StateFlow<List<PaymentRecord>> = _paymentHistory.asStateFlow()
 
+    private val _workerEarnings = MutableStateFlow(0.0f)
+    val workerEarnings: StateFlow<Float> = _workerEarnings.asStateFlow()
+
     // UI state
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -128,6 +131,7 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
 
         // Load data for this worker
         loadWorkerBalance(worker._id)
+        loadWorkerEarnings(worker._id)
         loadTodayPunnetCount(worker._id)
         loadPaymentHistory(worker._id)
     }
@@ -182,6 +186,33 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private fun loadWorkerEarnings(workerId: String) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val result = paymentRepository.getWorkerEarnings(workerId)
+                _isLoading.value = false
+
+                when (result) {
+                    is Result.Success -> {
+                        _workerEarnings.value = result.data
+                    }
+                    is Result.Error -> {
+                        _error.value = "Failed to load worker earnings: ${result.message}"
+                        Log.e("PaymentViewModel", "Error loading worker earnings", result.exception)
+                    }
+                    is Result.Loading -> {
+                        // Already handling loading state
+                    }
+                }
+            } catch (e: Exception) {
+                _isLoading.value = false
+                _error.value = "Error loading worker earnings: ${e.message}"
+                Log.e("PaymentViewModel", "Error loading worker earnings", e)
+            }
+        }
+    }
+
     private fun loadTodayPunnetCount(workerId: String) {
         viewModelScope.launch {
             _isLoading.value = true
@@ -227,6 +258,42 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
                         _isLoading.value = true
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Check if there's a discrepancy between stored and calculated balance
+     */
+    fun checkBalanceDiscrepancy() {
+        val worker = _selectedWorker.value ?: return
+
+        viewModelScope.launch {
+            try {
+                val earnings = _workerEarnings.value
+                val balance = _workerBalance.value
+                val payments = _paymentHistory.value.sumOf { it.amount.toDouble() }.toFloat()
+
+                // Calculate expected balance
+                val expectedBalance = earnings - payments
+
+                // If there's a significant difference (more than 0.01)
+                if (Math.abs(expectedBalance - balance) > 0.01f) {
+                    // Log the discrepancy
+                    Log.w("PaymentViewModel", "Balance discrepancy detected: stored=$balance, calculated=$expectedBalance")
+
+                    // Show a message to the user
+                    _error.value = "Виявлено розбіжність у балансі. Спроба виправлення..."
+
+                    // Try to fix by recalculating from scratch
+                    val result = paymentRepository.getWorkerBalance(worker._id)
+                    if (result is Result.Success) {
+                        _workerBalance.value = result.data
+                        _success.value = "Баланс оновлено"
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("PaymentViewModel", "Error checking balance discrepancy", e)
             }
         }
     }
@@ -307,6 +374,7 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
     fun clearSelection() {
         _selectedWorker.value = null
         _workerBalance.value = 0.0f
+        _workerEarnings.value = 0.0f
         _todayPunnetCount.value = 0
         _paymentHistory.value = emptyList()
     }
