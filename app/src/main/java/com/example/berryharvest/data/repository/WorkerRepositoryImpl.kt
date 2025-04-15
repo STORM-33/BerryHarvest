@@ -22,10 +22,12 @@ import java.util.UUID
  */
 class WorkerRepositoryImpl(
     application: Application,
-    networkManager: EnhancedNetworkManager
+    networkManager: EnhancedNetworkManager,
+    databaseTransactionManager: DatabaseTransactionManager
 ) : BaseRepositoryImpl<Worker>(
     application = application,
     networkManager = networkManager,
+    databaseTransactionManager = databaseTransactionManager,
     entityType = "worker",
     logTag = "WorkerRepository"
 ), WorkerRepository {
@@ -385,5 +387,117 @@ class WorkerRepositoryImpl(
             setError("Failed to load workers by IDs: ${e.message}")
             emit(Result.Error(e))
         }
+    }
+
+    /**
+     * Adds a worker with the provided details.
+     */
+    override suspend fun addWorkerWithDetails(fullName: String, phoneNumber: String): Result<String> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Starting add operation for worker: $fullName")
+            var workerId = ""
+
+            // Get next sequence number outside of write transaction
+            val nextSequence = getNextSequenceNumber()
+            Log.d(logTag, "Next sequence number: $nextSequence")
+
+            // Use safe write with retry
+            safeWrite {
+                val newWorker = copyToRealm(Worker().apply {
+                    _id = UUID.randomUUID().toString()
+                    sequenceNumber = nextSequence
+                    this.fullName = fullName
+                    this.phoneNumber = phoneNumber
+                    createdAt = System.currentTimeMillis()
+                    isSynced = networkManager.isNetworkAvailable()
+                    isDeleted = false
+                })
+                workerId = newWorker._id
+                Log.d(logTag, "Added worker: $workerId with sequence $nextSequence")
+            }
+
+            // Track pending operation if offline
+            if (!networkManager.isNetworkAvailable()) {
+                addPendingOperation(
+                    PendingOperation.Add(workerId, entityType)
+                )
+            }
+
+            Log.d(logTag, "Add operation completed successfully")
+            Result.Success(workerId)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error in addWorkerWithDetails", e)
+            setError("Failed to add worker: ${e.message}")
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Updates a worker with the provided details.
+     */
+    override suspend fun updateWorkerWithDetails(id: String, fullName: String, phoneNumber: String): Result<Boolean> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Starting update operation for worker: $id")
+
+            // Use safe write with retry
+            safeWrite {
+                // Find the live object INSIDE transaction
+                val worker = query<Worker>("_id == $0", id).first().find()
+                worker?.apply {
+                    this.fullName = fullName
+                    this.phoneNumber = phoneNumber
+                    isSynced = networkManager.isNetworkAvailable()
+                }
+                Log.d(logTag, "Updated worker: $id with name=$fullName, phone=$phoneNumber")
+            }
+
+            // Track pending operation if offline
+            if (!networkManager.isNetworkAvailable()) {
+                addPendingOperation(
+                    PendingOperation.Update(id, entityType)
+                )
+            }
+
+            Log.d(logTag, "Update operation completed successfully")
+            Result.Success(true)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error in updateWorkerWithDetails", e)
+            setError("Failed to update worker: ${e.message}")
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Completely deletes a worker.
+     */
+    override suspend fun completelyDeleteWorker(id: String): Result<Boolean> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Starting complete delete operation for worker: $id")
+
+            // Use safe write with retry
+            safeWrite {
+                // Find the live object INSIDE transaction
+                val worker = query<Worker>("_id == $0", id).first().find()
+                worker?.let {
+                    delete(it)
+                    Log.d(logTag, "Completely deleted worker: $id")
+                }
+            }
+
+            Log.d(logTag, "Complete delete operation completed successfully")
+            Result.Success(true)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error in completelyDeleteWorker", e)
+            setError("Failed to delete worker: ${e.message}")
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Gets the next available sequence number for a worker.
+     */
+    override suspend fun getNextSequenceNumber(): Int = withDatabaseContext { realm ->
+        val max = realm.query<Worker>().max<Int>("sequenceNumber").find()
+        (max ?: 0) + 1
     }
 }

@@ -37,4 +37,14 @@ interface GatherRepository : BaseRepository<Gather> {
      * Get worker's production for today.
      */
     suspend fun getWorkerTodayProduction(workerId: String): Result<Int>
+
+    /**
+     * Record a new gather with full details.
+     */
+    suspend fun recordGather(workerId: String, rowNumber: Int, numOfPunnets: Int, punnetCost: Float): Result<String>
+
+    /**
+     * Update an existing gather record.
+     */
+    suspend fun updateGatherDetails(gatherId: String, numOfPunnets: Int): Result<Boolean>
 }

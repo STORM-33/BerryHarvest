@@ -19,10 +19,12 @@ import java.util.UUID
  */
 class SettingsRepositoryImpl(
     application: Application,
-    networkManager: EnhancedNetworkManager
+    networkManager: EnhancedNetworkManager,
+    databaseTransactionManager: DatabaseTransactionManager
 ) : BaseRepositoryImpl<Settings>(
     application = application,
     networkManager = networkManager,
+    databaseTransactionManager = databaseTransactionManager,
     entityType = "settings",
     logTag = "SettingsRepository"
 ), SettingsRepository {

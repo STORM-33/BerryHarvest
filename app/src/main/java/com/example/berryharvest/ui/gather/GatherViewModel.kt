@@ -27,10 +27,12 @@ import java.util.UUID
 
 class GatherViewModel(application: Application) : AndroidViewModel(application) {
     private val TAG = "GatherViewModel"
-    private val app = getApplication<BerryHarvestApplication>()
-    private val settingsRepository = app.repositoryProvider.settingsRepository
-    private val assignmentRepository = app.repositoryProvider.assignmentRepository
+    private val app: BerryHarvestApplication = getApplication() as BerryHarvestApplication
+
     private val workerRepository = app.repositoryProvider.workerRepository
+    private val assignmentRepository = app.repositoryProvider.assignmentRepository
+    private val gatherRepository = app.repositoryProvider.gatherRepository
+    private val settingsRepository = app.repositoryProvider.settingsRepository
     private val networkStatusManager = app.networkStatusManager
 
     // Punnet price
@@ -118,147 +120,165 @@ class GatherViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun handleScanResult(scannedCode: String) {
-        viewModelScope.launch(Dispatchers.IO) {
+    /**
+     * Handle QR scan result.
+     */
+    fun handleScanResult(qrContent: String) {
+        viewModelScope.launch {
+            _isLoading.value = true
+
             try {
-                _isLoading.value = true
+                // Use worker repository to find worker by QR code
+                val result = workerRepository.getWorkerByQrCode(qrContent)
 
-                val realm = app.getRealmInstance()
-                // Try to find worker by QR code first
-                var worker = realm.query<Worker>("qrCode == $0", scannedCode).first().find()
+                when (result) {
+                    is Result.Success -> {
+                        val worker = result.data
+                        if (worker != null) {
+                            // Check if worker is assigned to a row
+                            val assignmentResult = assignmentRepository.getWorkerAssignment(worker._id)
 
-                // If not found by QR code, try by ID (some QR codes might directly contain the ID)
-                if (worker == null) {
-                    worker = realm.query<Worker>("_id == $0", scannedCode).first().find()
-                }
+                            when (assignmentResult) {
+                                is Result.Success -> {
+                                    val assignment = assignmentResult.data
+                                    val rowNumber = assignment?.rowNumber ?: -1
 
-                if (worker == null) {
-                    _errorMessage.postValue("Працівника не знайдено")
-                    _isLoading.value = false
-                    return@launch
-                }
-
-                // Find assignment for this worker
-                val assignment = realm.query<Assignment>("workerId == $0 AND isDeleted == false", worker._id)
-                    .first().find()
-
-                if (assignment == null) {
-                    // Worker is not assigned to a row
-                    withContext(Dispatchers.Main) {
-                        // Show dialog to assign worker to a row
-                        _workerAssignment.postValue(Pair(worker, -1)) // -1 indicates no row assignment
+                                    // Set the worker assignment (to be observed by UI)
+                                    _workerAssignment.value = Pair(worker, rowNumber)
+                                }
+                                is Result.Error -> {
+                                    _errorMessage.value = "Помилка перевірки призначення: ${assignmentResult.message}"
+                                    Log.e(TAG, "Error checking assignment", assignmentResult.exception)
+                                }
+                                is Result.Loading -> {
+                                    // Loading is already handled
+                                }
+                            }
+                        } else {
+                            _errorMessage.value = "Працівника не знайдено за QR кодом"
+                        }
                     }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        _workerAssignment.postValue(Pair(worker, assignment.rowNumber))
+                    is Result.Error -> {
+                        _errorMessage.value = "Помилка сканування: ${result.message}"
+                        Log.e(TAG, "Error scanning QR", result.exception)
+                    }
+                    is Result.Loading -> {
+                        // Loading is already handled
                     }
                 }
-
-                _isLoading.value = false
             } catch (e: Exception) {
+                _errorMessage.value = "Помилка: ${e.message}"
                 Log.e(TAG, "Error handling scan", e)
-                _errorMessage.postValue("Помилка при обробці сканування: ${e.message}")
+            } finally {
                 _isLoading.value = false
             }
         }
     }
 
+    /**
+     * Save gather data.
+     */
     fun saveGatherData(workerId: String, rowNumber: Int, numOfPunnets: Int) {
-        if (numOfPunnets <= 0) {
-            _errorMessage.postValue("Кількість пінеток повинна бути більше 0")
-            return
-        }
+        viewModelScope.launch {
+            _isLoading.value = true
 
-        viewModelScope.launch(Dispatchers.IO) {
             try {
-                _isLoading.value = true
-                val currentPrice = _punnetPrice.value ?: 0.0f
+                // Get current punnet price
+                val priceResult = settingsRepository.getPunnetPrice()
+                val punnetPrice = _punnetPrice.value ?: priceResult
 
-                // Use safe transaction wrapper
-                app.safeWriteTransaction {
-                    copyToRealm(Gather().apply {
-                        _id = UUID.randomUUID().toString()
-                        this.workerId = workerId
-                        this.rowNumber = rowNumber
-                        this.numOfPunnets = numOfPunnets
-                        this.punnetCost = currentPrice
-                        dateTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-                        isSynced = networkStatusManager.isNetworkAvailable()
-                        isDeleted = false
-                    })
+                // Use gather repository to record gather
+                val result = gatherRepository.recordGather(workerId, rowNumber, numOfPunnets, punnetPrice)
+
+                when (result) {
+                    is Result.Success -> {
+                        _successMessage.value = true
+                        // Update stats and gathers after successful save
+                        loadRecentGathers()
+                        calculateTodayStats()
+                    }
+                    is Result.Error -> {
+                        _errorMessage.value = "Помилка збереження даних: ${result.message}"
+                        Log.e(TAG, "Error saving gather", result.exception)
+                    }
+                    is Result.Loading -> {
+                        // Loading is already handled
+                    }
                 }
-
-                // Refresh data
-                loadRecentGathers()
-                calculateTodayStats()
-                countUnsyncedGathers()
-
-                _successMessage.postValue(true)
-                _isLoading.value = false
             } catch (e: Exception) {
-                Log.e(TAG, "Error saving gather data", e)
-                _errorMessage.postValue("Помилка при збереженні даних: ${e.message}")
+                _errorMessage.value = "Помилка: ${e.message}"
+                Log.e(TAG, "Error saving gather", e)
+            } finally {
                 _isLoading.value = false
             }
         }
     }
 
-    fun updateGatherData(gatherId: String, numOfPunnets: Int) {
-        if (numOfPunnets <= 0) {
-            _errorMessage.postValue("Кількість пінеток повинна бути більше 0")
-            return
-        }
+    /**
+     * Update gather details.
+     */
+    fun updateGatherDetails(gatherId: String, numOfPunnets: Int) {
+        viewModelScope.launch {
+            _isLoading.value = true
 
-        viewModelScope.launch(Dispatchers.IO) {
             try {
-                _isLoading.value = true
+                // Use gather repository to update gather
+                val result = gatherRepository.updateGatherDetails(gatherId, numOfPunnets)
 
-                app.safeWriteTransaction {
-                    val gather = query<Gather>("_id == $0", gatherId).first().find()
-                    gather?.apply {
-                        this.numOfPunnets = numOfPunnets
-                        isSynced = false
+                when (result) {
+                    is Result.Success -> {
+                        _successMessage.value = true
+                        // Update stats and gathers after successful update
+                        loadRecentGathers()
+                        calculateTodayStats()
+                    }
+                    is Result.Error -> {
+                        _errorMessage.value = "Помилка оновлення даних: ${result.message}"
+                        Log.e(TAG, "Error updating gather", result.exception)
+                    }
+                    is Result.Loading -> {
+                        // Loading is already handled
                     }
                 }
-
-                // Refresh data
-                loadRecentGathers()
-                calculateTodayStats()
-                countUnsyncedGathers()
-
-                _successMessage.postValue(true)
-                _isLoading.value = false
             } catch (e: Exception) {
-                Log.e(TAG, "Error updating gather data", e)
-                _errorMessage.postValue("Помилка при оновленні даних: ${e.message}")
+                _errorMessage.value = "Помилка: ${e.message}"
+                Log.e(TAG, "Error updating gather", e)
+            } finally {
                 _isLoading.value = false
             }
         }
     }
 
-    fun deleteGatherData(gatherId: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                _isLoading.value = true
+    /**
+     * Delete gather record.
+     */
+    fun deleteGather(gatherId: String) {
+        viewModelScope.launch {
+            _isLoading.value = true
 
-                app.safeWriteTransaction {
-                    val gather = query<Gather>("_id == $0", gatherId).first().find()
-                    gather?.apply {
-                        isDeleted = true
-                        isSynced = false
+            try {
+                // Use gather repository to delete gather
+                val result = gatherRepository.delete(gatherId)
+
+                when (result) {
+                    is Result.Success -> {
+                        _successMessage.value = true
+                        // Update stats and gathers after successful delete
+                        loadRecentGathers()
+                        calculateTodayStats()
+                    }
+                    is Result.Error -> {
+                        _errorMessage.value = "Помилка видалення даних: ${result.message}"
+                        Log.e(TAG, "Error deleting gather", result.exception)
+                    }
+                    is Result.Loading -> {
+                        // Loading is already handled
                     }
                 }
-
-                // Refresh data
-                loadRecentGathers()
-                calculateTodayStats()
-                countUnsyncedGathers()
-
-                _successMessage.postValue(true)
-                _isLoading.value = false
             } catch (e: Exception) {
-                Log.e(TAG, "Error deleting gather data", e)
-                _errorMessage.postValue("Помилка при видаленні даних: ${e.message}")
+                _errorMessage.value = "Помилка: ${e.message}"
+                Log.e(TAG, "Error deleting gather", e)
+            } finally {
                 _isLoading.value = false
             }
         }

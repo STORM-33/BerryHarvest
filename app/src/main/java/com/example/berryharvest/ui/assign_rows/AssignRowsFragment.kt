@@ -279,28 +279,36 @@ class AssignRowsFragment : Fragment() {
     }
 
     private fun checkExistingAssignment(worker: Worker) {
-        lifecycleScope.launch(Dispatchers.IO) {
+        lifecycleScope.launch {
+            loadingProgressBar.visibility = View.VISIBLE
+
             try {
-                val app = requireActivity().application as BerryHarvestApplication
-                val realm = app.getRealmInstance()
+                // Use ViewModel to check existing assignment
+                val result = viewModel.checkWorkerAssignment(worker._id)
 
-                val existingAssignment = realm.query<Assignment>("workerId == $0", worker._id)
-                    .first().find()
-
-                withContext(Dispatchers.Main) {
-                    if (existingAssignment != null) {
-                        // Worker already assigned to a row, show confirmation dialog
-                        showReassignConfirmationDialog(worker, existingAssignment.rowNumber)
-                    } else {
-                        // Worker not assigned, proceed directly
-                        proceedWithAssignment(worker)
+                when (result) {
+                    is com.example.berryharvest.data.repository.Result.Success -> {
+                        val rowNumber = result.data
+                        if (rowNumber > 0) {
+                            // Worker already assigned to a row, show confirmation dialog
+                            showReassignConfirmationDialog(worker, rowNumber)
+                        } else {
+                            // Worker not assigned, proceed directly
+                            proceedWithAssignment(worker)
+                        }
+                    }
+                    is com.example.berryharvest.data.repository.Result.Error -> {
+                        Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
+                    }
+                    is com.example.berryharvest.data.repository.Result.Loading -> {
+                        // Loading is already handled
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error checking existing assignment", e)
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(requireContext(), "Помилка: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
+                Log.e(TAG, "Error checking assignment", e)
+                Toast.makeText(requireContext(), "Помилка: ${e.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                loadingProgressBar.visibility = View.GONE
             }
         }
     }
@@ -333,97 +341,43 @@ class AssignRowsFragment : Fragment() {
         loadingProgressBar.visibility = View.VISIBLE
         assignButton.isEnabled = false
 
-        // Store worker and row data locally
-        val workerId = worker._id
-        val finalRowNumber = rowNumber
-
-        lifecycleScope.launch(Dispatchers.IO) {
+        lifecycleScope.launch {
             try {
-                Log.d(TAG, "Starting assignment with safe transaction: workerId=$workerId, rowNumber=$finalRowNumber")
+                // Use ViewModel to assign worker to row
+                val result = viewModel.assignWorkerToRow(worker._id, rowNumber)
 
-                val app = requireActivity().application as BerryHarvestApplication
-                val realm = app.getRealmInstance()
+                when (result) {
+                    is com.example.berryharvest.data.repository.Result.Success -> {
+                        Toast.makeText(requireContext(), "Призначено на ряд $rowNumber", Toast.LENGTH_SHORT).show()
 
-                // Check for existing assignment first
-                val existingAssignment = realm.query<Assignment>("workerId == $0", workerId)
-                    .first().find()
+                        // Clear selection
+                        workerSearchView.clearSelection()
+                        selectedWorker = null
 
-                Log.d(TAG, "Existing assignment check: ${existingAssignment?._id ?: "none"}")
+                        // Clear row number
+                        rowEditText.text?.clear()
+                        rowNumberInputLayout.error = null
 
-                // Check network status
-                val isNetworkAvailable = app.networkStatusManager.isNetworkAvailable()
-                Log.d(TAG, "Network available for assignment: $isNetworkAvailable")
-
-                // Use the safe transaction wrapper
-                val assignmentId = app.safeWriteTransaction {
-                    if (existingAssignment != null) {
-                        // Update existing assignment
-                        val liveAssignment = query<Assignment>("_id == $0", existingAssignment._id)
-                            .first().find()
-
-                        liveAssignment?.let {
-                            it.rowNumber = finalRowNumber
-                            // Set isSynced based on network availability
-                            it.isSynced = isNetworkAvailable
-                            Log.d(TAG, "Updated existing assignment: ${existingAssignment._id}, isSynced=$isNetworkAvailable")
+                        // If searching for this row, make sure it stays visible
+                        val searchQuery = searchRowEditText.text.toString()
+                        if (searchQuery.isNotEmpty() && !rowNumber.toString().contains(searchQuery)) {
+                            // Clear search to show all rows including the new assignment
+                            searchRowEditText.text?.clear()
                         }
-                        existingAssignment._id
-                    } else {
-                        // Create new assignment
-                        val newAssignmentId = UUID.randomUUID().toString()
-                        copyToRealm(Assignment().apply {
-                            _id = newAssignmentId
-                            this.workerId = workerId
-                            this.rowNumber = finalRowNumber
-                            // Set isSynced based on network availability
-                            this.isSynced = isNetworkAvailable
-                        })
-                        Log.d(TAG, "Created new assignment with ID: $newAssignmentId, isSynced=$isNetworkAvailable")
-                        newAssignmentId
                     }
-                }
-
-                // Verify the assignment was saved
-                val savedAssignment = realm.query<Assignment>("_id == $0", assignmentId).first().find()
-                Log.d(TAG, "Assignment saved successfully: ${savedAssignment != null}, row: ${savedAssignment?.rowNumber}, isSynced: ${savedAssignment?.isSynced}")
-
-                withContext(Dispatchers.Main) {
-                    if (isAdded) {
-                        loadingProgressBar.visibility = View.GONE
-                        assignButton.isEnabled = true
-
-                        if (savedAssignment != null) {
-                            Toast.makeText(requireContext(), "Призначено на ряд $finalRowNumber", Toast.LENGTH_SHORT).show()
-
-                            // Clear selection
-                            workerSearchView.clearSelection()
-                            selectedWorker = null
-
-                            // Clear row number only if successful assignment
-                            rowEditText.text?.clear()
-                            rowNumberInputLayout.error = null
-
-                            // If searching for this row, make sure it stays visible
-                            val searchQuery = searchRowEditText.text.toString()
-                            if (searchQuery.isNotEmpty() && !finalRowNumber.toString().contains(searchQuery)) {
-                                // Clear search to show all rows including the new assignment
-                                searchRowEditText.text?.clear()
-                            }
-                        } else {
-                            Toast.makeText(requireContext(), "Помилка: Не збережено", Toast.LENGTH_SHORT).show()
-                        }
+                    is com.example.berryharvest.data.repository.Result.Error -> {
+                        Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
+                    }
+                    is com.example.berryharvest.data.repository.Result.Loading -> {
+                        // Loading is already handled
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error in assignment", e)
-
-                withContext(Dispatchers.Main) {
-                    if (isAdded) {
-                        loadingProgressBar.visibility = View.GONE
-                        assignButton.isEnabled = true
-                        Toast.makeText(requireContext(), "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
-                }
+                Log.e(TAG, "Error assigning worker", e)
+                Toast.makeText(requireContext(), "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                loadingProgressBar.visibility = View.GONE
+                assignButton.isEnabled = true
             }
         }
     }
@@ -462,27 +416,13 @@ class AssignRowsFragment : Fragment() {
             loadingProgressBar.visibility = View.VISIBLE
             dialog.dismiss()
 
-            // Direct move operation
-            lifecycleScope.launch(Dispatchers.IO) {
+            // Use ViewModel to move worker
+            lifecycleScope.launch {
                 try {
-                    val app = requireActivity().application as BerryHarvestApplication
-                    val realm = app.getRealmInstance()
+                    val result = viewModel.moveWorkerToRow(assignment._id, newRowNumber)
 
-                    // Store the assignment ID
-                    val assignmentId = assignment._id
-
-                    // Quick, focused transaction
-                    realm.write {
-                        query<Assignment>("_id == $0", assignmentId)
-                            .first().find()?.apply {
-                                rowNumber = newRowNumber
-                                isSynced = false
-                            }
-                    }
-
-                    withContext(Dispatchers.Main) {
-                        if (isAdded) {
-                            loadingProgressBar.visibility = View.GONE
+                    when (result) {
+                        is com.example.berryharvest.data.repository.Result.Success -> {
                             Toast.makeText(requireContext(), "Переміщено на ряд $newRowNumber", Toast.LENGTH_SHORT).show()
 
                             // If searching, make sure the row stays visible
@@ -492,15 +432,18 @@ class AssignRowsFragment : Fragment() {
                                 searchRowEditText.text?.clear()
                             }
                         }
+                        is com.example.berryharvest.data.repository.Result.Error -> {
+                            Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
+                        }
+                        is com.example.berryharvest.data.repository.Result.Loading -> {
+                            // Loading is already handled
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error moving worker", e)
-                    withContext(Dispatchers.Main) {
-                        if (isAdded) {
-                            loadingProgressBar.visibility = View.GONE
-                            Toast.makeText(requireContext(), "Помилка: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    }
+                    Toast.makeText(requireContext(), "Помилка: ${e.message}", Toast.LENGTH_SHORT).show()
+                } finally {
+                    loadingProgressBar.visibility = View.GONE
                 }
             }
         }
@@ -562,41 +505,27 @@ class AssignRowsFragment : Fragment() {
                 // Show loading
                 loadingProgressBar.visibility = View.VISIBLE
 
-                // Direct row deletion
-                lifecycleScope.launch(Dispatchers.IO) {
+                // Use ViewModel to delete row
+                lifecycleScope.launch {
                     try {
-                        val app = requireActivity().application as BerryHarvestApplication
-                        val realm = app.getRealmInstance()
+                        val result = viewModel.deleteEntireRow(rowNumber)
 
-                        // Get the IDs of assignments to delete
-                        val assignmentIds = realm.query<Assignment>("rowNumber == $0", rowNumber)
-                            .find()
-                            .map { it._id }
-
-                        // Quick, focused transaction
-                        realm.write {
-                            assignmentIds.forEach { id ->
-                                query<Assignment>("_id == $0", id)
-                                    .first().find()?.let {
-                                        delete(it)
-                                    }
-                            }
-                        }
-
-                        withContext(Dispatchers.Main) {
-                            if (isAdded) {
-                                loadingProgressBar.visibility = View.GONE
+                        when (result) {
+                            is com.example.berryharvest.data.repository.Result.Success -> {
                                 Toast.makeText(requireContext(), "Ряд $rowNumber видалено", Toast.LENGTH_SHORT).show()
+                            }
+                            is com.example.berryharvest.data.repository.Result.Error -> {
+                                Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
+                            }
+                            is com.example.berryharvest.data.repository.Result.Loading -> {
+                                // Loading is already handled
                             }
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error deleting row", e)
-                        withContext(Dispatchers.Main) {
-                            if (isAdded) {
-                                loadingProgressBar.visibility = View.GONE
-                                Toast.makeText(requireContext(), "Помилка: ${e.message}", Toast.LENGTH_SHORT).show()
-                            }
-                        }
+                        Toast.makeText(requireContext(), "Помилка: ${e.message}", Toast.LENGTH_SHORT).show()
+                    } finally {
+                        loadingProgressBar.visibility = View.GONE
                     }
                 }
             }

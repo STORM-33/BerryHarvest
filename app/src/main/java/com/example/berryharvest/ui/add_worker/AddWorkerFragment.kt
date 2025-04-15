@@ -282,76 +282,31 @@ class AddWorkerFragment : Fragment() {
         loadingProgressBar.visibility = View.VISIBLE
         buttonAddWorker.isEnabled = false
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        lifecycleScope.launch {
             try {
-                Log.d(TAG, "Starting worker add with safe transaction")
+                // Use the ViewModel to add the worker
+                viewModel.addWorker(fullName, phoneNumber)
 
-                val app = requireActivity().application as BerryHarvestApplication
+                // Clear input fields
+                editTextFullName.text?.clear()
+                editTextPhoneNumber.text?.clear()
 
-                // Generate a new worker with UUID
-                val workerId = UUID.randomUUID().toString()
+                // Clear any input errors
+                fullNameInputLayout.error = null
+                phoneNumberInputLayout.error = null
 
-                // Get next sequence number - do this outside transaction
-                val realm = app.getRealmInstance()
-                val maxSequence = realm.query<Worker>().max<Int>("sequenceNumber").find() ?: 0
-                val nextSequence = maxSequence + 1
-
-                // Check network status
-                val isNetworkAvailable = app.networkStatusManager.isNetworkAvailable()
-                Log.d(TAG, "Network available: $isNetworkAvailable")
-
-                Log.d(TAG, "Using safe transaction wrapper with worker ID: $workerId, sequence: $nextSequence")
-
-                // Use the safe transaction wrapper
-                app.safeWriteTransaction {
-                    copyToRealm(Worker().apply {
-                        _id = workerId
-                        sequenceNumber = nextSequence
-                        this.fullName = fullName
-                        this.phoneNumber = phoneNumber
-                        // Set sync status based on network availability
-                        isSynced = isNetworkAvailable
-                    })
-                }
-
-                // Verify worker was added
-                val savedWorker = realm.query<Worker>("_id == $0", workerId).first().find()
-                Log.d(TAG, "Worker saved successfully: ${savedWorker != null}, isSynced: ${savedWorker?.isSynced}")
-
-                withContext(Dispatchers.Main) {
-                    if (isAdded) {
-                        loadingProgressBar.visibility = View.GONE
-                        buttonAddWorker.isEnabled = true
-
-                        if (savedWorker != null) {
-                            Toast.makeText(context, "Працівника додано", Toast.LENGTH_SHORT).show()
-
-                            // Clear input fields
-                            editTextFullName.text?.clear()
-                            editTextPhoneNumber.text?.clear()
-
-                            // Clear any input errors
-                            fullNameInputLayout.error = null
-                            phoneNumberInputLayout.error = null
-
-                            // Scroll to the newly added worker (if visible in current filter)
-                            if (searchEditText.text.toString().isEmpty()) {
-                                recyclerViewWorkers.scrollToPosition(0)
-                            }
-                        } else {
-                            Toast.makeText(context, "Помилка: Працівника не збережено", Toast.LENGTH_SHORT).show()
-                        }
-                    }
+                // Scroll to the newly added worker (if visible in current filter)
+                if (searchEditText.text.toString().isEmpty()) {
+                    recyclerViewWorkers.scrollToPosition(0)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error adding worker", e)
-
-                withContext(Dispatchers.Main) {
-                    if (isAdded) {
-                        loadingProgressBar.visibility = View.GONE
-                        buttonAddWorker.isEnabled = true
-                        Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
+                Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
+            } finally {
+                // This will get called even if there's an exception
+                if (isAdded) {
+                    loadingProgressBar.visibility = View.GONE
+                    buttonAddWorker.isEnabled = true
                 }
             }
         }
@@ -439,37 +394,23 @@ class AddWorkerFragment : Fragment() {
     }
 
     private fun updateWorker(workerId: String, fullName: String, phoneNumber: String) {
-        // Direct update operation
+        // Show loading state immediately
         loadingProgressBar.visibility = View.VISIBLE
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        lifecycleScope.launch {
             try {
-                val app = requireActivity().application as BerryHarvestApplication
-                val realm = app.getRealmInstance()
+                // Use the ViewModel to update the worker
+                viewModel.updateWorker(workerId, fullName, phoneNumber)
 
-                // Quick, focused transaction
-                realm.write {
-                    query<Worker>("_id == $0", workerId)
-                        .first().find()?.apply {
-                            this.fullName = fullName
-                            this.phoneNumber = phoneNumber
-                            isSynced = false
-                        }
-                }
-
-                withContext(Dispatchers.Main) {
-                    if (isAdded) {
-                        loadingProgressBar.visibility = View.GONE
-                        Toast.makeText(context, "Дані оновлено", Toast.LENGTH_SHORT).show()
-                    }
-                }
+                Toast.makeText(context, "Дані оновлено", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Log.e(TAG, "Error updating worker", e)
-                withContext(Dispatchers.Main) {
-                    if (isAdded) {
-                        loadingProgressBar.visibility = View.GONE
-                        Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
-                    }
+                if (isAdded) {
+                    Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                if (isAdded) {
+                    loadingProgressBar.visibility = View.GONE
                 }
             }
         }
@@ -483,36 +424,20 @@ class AddWorkerFragment : Fragment() {
                 // Show loading
                 loadingProgressBar.visibility = View.VISIBLE
 
-                // Direct delete operation
-                lifecycleScope.launch(Dispatchers.IO) {
+                lifecycleScope.launch {
                     try {
-                        val app = requireActivity().application as BerryHarvestApplication
-                        val realm = app.getRealmInstance()
+                        // Use the ViewModel to delete the worker
+                        viewModel.deleteWorker(worker._id)
 
-                        // Store worker ID
-                        val workerId = worker._id
-
-                        // Quick, focused transaction
-                        realm.write {
-                            query<Worker>("_id == $0", workerId)
-                                .first().find()?.let {
-                                    delete(it)
-                                }
-                        }
-
-                        withContext(Dispatchers.Main) {
-                            if (isAdded) {
-                                loadingProgressBar.visibility = View.GONE
-                                Toast.makeText(context, "Працівника видалено", Toast.LENGTH_SHORT).show()
-                            }
-                        }
+                        Toast.makeText(context, "Працівника видалено", Toast.LENGTH_SHORT).show()
                     } catch (e: Exception) {
                         Log.e(TAG, "Error deleting worker", e)
-                        withContext(Dispatchers.Main) {
-                            if (isAdded) {
-                                loadingProgressBar.visibility = View.GONE
-                                Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
-                            }
+                        if (isAdded) {
+                            Toast.makeText(context, "Помилка: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
+                    } finally {
+                        if (isAdded) {
+                            loadingProgressBar.visibility = View.GONE
                         }
                     }
                 }

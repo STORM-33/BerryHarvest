@@ -110,7 +110,7 @@ class BerryHarvestApplication : Application() {
      * @return A valid Realm instance
      * @throws IllegalStateException if Realm initialization fails
      */
-    suspend fun getRealmInstance(): Realm {
+    internal suspend fun getRealmInstance(): Realm {
         if (isShuttingDown.get()) {
             throw IllegalStateException("Application is shutting down")
         }

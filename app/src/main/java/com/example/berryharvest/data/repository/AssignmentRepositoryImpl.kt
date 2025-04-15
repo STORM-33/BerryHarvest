@@ -20,10 +20,12 @@ import java.util.UUID
  */
 class AssignmentRepositoryImpl(
     application: Application,
-    networkManager: EnhancedNetworkManager
+    networkManager: EnhancedNetworkManager,
+    databaseTransactionManager: DatabaseTransactionManager
 ) : BaseRepositoryImpl<Assignment>(
     application = application,
     networkManager = networkManager,
+    databaseTransactionManager = databaseTransactionManager,
     entityType = "assignment",
     logTag = "AssignmentRepository"
 ), AssignmentRepository {
@@ -345,6 +347,150 @@ class AssignmentRepositoryImpl(
             Result.Success(true)
         } catch (e: Exception) {
             Log.e(logTag, "Error moving row", e)
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Assign a worker to a row.
+     */
+    override suspend fun assignWorkerToRow(workerId: String, rowNumber: Int): Result<String> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Starting assign worker $workerId to row $rowNumber")
+            var assignmentId = ""
+
+            // First check if the worker already has an assignment
+            val existingAssignment = realm.query<Assignment>(
+                "workerId == $0 AND isDeleted == false",
+                workerId
+            ).first().find()
+
+            Log.d(logTag, "Existing assignment check: ${existingAssignment?._id ?: "none"}")
+
+            // Keep transaction small and focused
+            safeWrite {
+                if (existingAssignment != null) {
+                    // Update existing assignment instead of creating a new one
+                    val liveAssignment = query<Assignment>("_id == $0", existingAssignment._id).first().find()
+                    liveAssignment?.apply {
+                        this.rowNumber = rowNumber
+                        isSynced = networkManager.isNetworkAvailable()
+                    }
+                    assignmentId = existingAssignment._id
+                    Log.d(logTag, "Updated existing assignment: $assignmentId")
+                } else {
+                    // Create a new assignment
+                    val newAssignment = copyToRealm(Assignment().apply {
+                        _id = UUID.randomUUID().toString()
+                        this.rowNumber = rowNumber
+                        this.workerId = workerId
+                        isSynced = networkManager.isNetworkAvailable()
+                        isDeleted = false
+                    })
+                    assignmentId = newAssignment._id
+                    Log.d(logTag, "Created new assignment: $assignmentId")
+                }
+            }
+
+            // Track pending operation if offline
+            if (!networkManager.isNetworkAvailable()) {
+                addPendingOperation(
+                    PendingOperation.Add(assignmentId, entityType)
+                )
+            }
+
+            Log.d(logTag, "Assign operation completed successfully")
+            Result.Success(assignmentId)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error in assignWorkerToRow", e)
+            setError("Failed to assign worker to row: ${e.message}")
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Move a worker to a different row.
+     */
+    override suspend fun moveWorkerToRow(assignmentId: String, newRowNumber: Int): Result<Boolean> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Starting move assignment $assignmentId to row $newRowNumber")
+
+            safeWrite {
+                val assignment = query<Assignment>("_id == $0", assignmentId).first().find()
+                assignment?.apply {
+                    rowNumber = newRowNumber
+                    isSynced = networkManager.isNetworkAvailable()
+                    Log.d(logTag, "Moved assignment to row $newRowNumber")
+                }
+            }
+
+            // Track pending operation if offline
+            if (!networkManager.isNetworkAvailable()) {
+                addPendingOperation(
+                    PendingOperation.Update(assignmentId, entityType)
+                )
+            }
+
+            Log.d(logTag, "Move operation completed successfully")
+            Result.Success(true)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error in moveWorkerToRow", e)
+            setError("Failed to move worker to row: ${e.message}")
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Check if a worker is already assigned to a row.
+     */
+    override suspend fun getWorkerAssignment(workerId: String): Result<Assignment?> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Checking assignment for worker $workerId")
+
+            val assignment = realm.query<Assignment>(
+                "workerId == $0 AND isDeleted == false",
+                workerId
+            ).first().find()
+
+            Log.d(logTag, "Assignment found: ${assignment != null}")
+            Result.Success(assignment)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error checking worker assignment", e)
+            setError("Failed to check worker assignment: ${e.message}")
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Delete all assignments in a row.
+     */
+    override suspend fun completelyDeleteRow(rowNumber: Int): Result<Boolean> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Starting complete row deletion for row $rowNumber")
+
+            // Get all assignments in the row
+            val assignments = realm.query<Assignment>("rowNumber == $0", rowNumber).find()
+
+            if (assignments.isEmpty()) {
+                Log.d(logTag, "No assignments found in row $rowNumber")
+                return@withDatabaseContext Result.Success(true)
+            }
+
+            safeWrite {
+                assignments.forEach { assignment ->
+                    val liveAssignment = query<Assignment>("_id == $0", assignment._id).first().find()
+                    liveAssignment?.let {
+                        delete(it)
+                        Log.d(logTag, "Deleted assignment ${assignment._id} from row $rowNumber")
+                    }
+                }
+            }
+
+            Log.d(logTag, "Row deletion completed successfully")
+            Result.Success(true)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error in completelyDeleteRow", e)
+            setError("Failed to delete row: ${e.message}")
             Result.Error(e)
         }
     }

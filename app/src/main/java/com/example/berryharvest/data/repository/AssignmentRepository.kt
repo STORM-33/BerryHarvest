@@ -37,4 +37,24 @@ interface AssignmentRepository : BaseRepository<Assignment> {
      * Move all workers from one row to another.
      */
     suspend fun moveRow(fromRow: Int, toRow: Int): Result<Boolean>
+
+    /**
+     * Assign a worker to a row.
+     */
+    suspend fun assignWorkerToRow(workerId: String, rowNumber: Int): Result<String>
+
+    /**
+     * Move a worker to a different row.
+     */
+    suspend fun moveWorkerToRow(assignmentId: String, newRowNumber: Int): Result<Boolean>
+
+    /**
+     * Check if a worker is already assigned to a row.
+     */
+    suspend fun getWorkerAssignment(workerId: String): Result<Assignment?>
+
+    /**
+     * Delete all assignments in a row.
+     */
+    suspend fun completelyDeleteRow(rowNumber: Int): Result<Boolean>
 }

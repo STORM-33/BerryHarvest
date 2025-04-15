@@ -20,6 +20,7 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
         get() = getApplication() as BerryHarvestApplication
 
     private val repository = app.repositoryProvider.workerRepository
+
     private val networkStatusManager = app.networkStatusManager
 
     private val _workers = MutableStateFlow<List<Worker>>(emptyList())
@@ -92,12 +93,8 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             try {
                 _isLoading.value = true
-                val worker = Worker().apply {
-                    this.fullName = fullName
-                    this.phoneNumber = phoneNumber
-                }
 
-                val result = repository.add(worker)
+                val result = repository.addWorkerWithDetails(fullName, phoneNumber)
 
                 when (result) {
                     is Result.Success -> {
@@ -124,39 +121,23 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
             try {
                 _isLoading.value = true
 
-                // First get the worker by ID
-                val getResult = repository.getById(id)
+                val result = repository.updateWorkerWithDetails(id, fullName, phoneNumber)
 
-                if (getResult is Result.Success && getResult.data != null) {
-                    // Update the worker object with new values
-                    val worker = getResult.data.apply {
-                        this.fullName = fullName
-                        this.phoneNumber = phoneNumber
+                when (result) {
+                    is Result.Success -> {
+                        Log.d("AddWorkerViewModel", "Worker updated: $id")
+                        _error.value = null
                     }
-
-                    // Save the updated worker
-                    val updateResult = repository.update(worker)
-
-                    when (updateResult) {
-                        is Result.Success -> {
-                            Log.d("AddWorkerViewModel", "Worker updated: $id")
-                            _error.value = null
-                        }
-                        is Result.Error -> {
-                            _error.value = "Failed to update worker: ${updateResult.message}"
-                            Log.e("AddWorkerViewModel", "Error updating worker", updateResult.exception)
-                        }
-                        is Result.Loading -> { /* Already handled by isLoading state */ }
+                    is Result.Error -> {
+                        _error.value = "Failed to update worker: ${result.message}"
+                        Log.e("AddWorkerViewModel", "Error updating worker", result.exception)
                     }
-                } else if (getResult is Result.Error) {
-                    _error.value = "Failed to find worker: ${getResult.message}"
-                    Log.e("AddWorkerViewModel", "Error finding worker for update", getResult.exception)
+                    is Result.Loading -> { /* Already handled by isLoading state */ }
                 }
-
-                _isLoading.value = false
             } catch (e: Exception) {
                 _error.value = "Error updating worker: ${e.message}"
                 Log.e("AddWorkerViewModel", "Error updating worker", e)
+            } finally {
                 _isLoading.value = false
             }
         }
@@ -180,11 +161,10 @@ class AddWorkerViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                     is Result.Loading -> { /* Already handled by isLoading state */ }
                 }
-
-                _isLoading.value = false
             } catch (e: Exception) {
                 _error.value = "Error deleting worker: ${e.message}"
                 Log.e("AddWorkerViewModel", "Error deleting worker", e)
+            } finally {
                 _isLoading.value = false
             }
         }

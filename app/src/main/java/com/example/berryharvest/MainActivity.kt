@@ -125,25 +125,22 @@ class MainActivity : AppCompatActivity() {
         // Show a progress dialog
         showProgressDialog("Connecting to database...")
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        // Use repositories instead of direct Realm access
+        lifecycleScope.launch {
             try {
-                // Get Realm instance from Application class
-                realm = (application as BerryHarvestApplication).getRealmInstance()
+                // Wait for repository provider to be ready
+                val provider = (application as BerryHarvestApplication).repositoryProvider
 
-                // Run diagnostics
-                val diagnostics = RealmDiagnostics.checkRealmStatus(
-                    (application as BerryHarvestApplication).app,
-                    realm
-                )
+                // Try a simple operation to verify connection
+                val settings = provider.settingsRepository.getSettings()
 
-                Log.d("REALM", diagnostics)
+                Log.d("REALM", "Repositories initialized successfully")
 
                 withContext(Dispatchers.Main) {
                     hideProgressDialog()
-                    Log.d("REALM", "Realm initialized successfully")
                 }
             } catch (e: Exception) {
-                Log.e("REALM", "Realm initialization error: ${e.message}", e)
+                Log.e("REALM", "Repository initialization error: ${e.message}", e)
                 withContext(Dispatchers.Main) {
                     hideProgressDialog()
 
@@ -250,13 +247,14 @@ class MainActivity : AppCompatActivity() {
     private fun initializeOfflineRealm() {
         showProgressDialog("Setting up offline mode...")
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        lifecycleScope.launch {
             try {
                 // Force offline mode in application
                 (application as BerryHarvestApplication).forceOfflineMode = true
 
-                // Try to get offline Realm instance
-                realm = (application as BerryHarvestApplication).getRealmInstance()
+                // Try a simple operation to verify connection
+                val provider = (application as BerryHarvestApplication).repositoryProvider
+                val settings = provider.settingsRepository.getSettings()
 
                 withContext(Dispatchers.Main) {
                     hideProgressDialog()
@@ -267,7 +265,7 @@ class MainActivity : AppCompatActivity() {
                     ).show()
                 }
             } catch (e: Exception) {
-                Log.e("REALM", "Offline Realm initialization error: ${e.message}", e)
+                Log.e("REALM", "Offline Repository initialization error: ${e.message}", e)
                 withContext(Dispatchers.Main) {
                     hideProgressDialog()
                     showError("Failed to initialize offline database: ${e.message}")
@@ -510,10 +508,6 @@ class MainActivity : AppCompatActivity() {
         for (fragment in supportFragmentManager.fragments) {
             fragment.onActivityResult(requestCode, resultCode, data)
         }
-    }
-
-    fun getRealm(): Realm? {
-        return realm
     }
 
     override fun onDestroy() {

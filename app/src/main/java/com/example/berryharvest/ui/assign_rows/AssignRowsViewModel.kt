@@ -16,9 +16,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-private const val TAG = "AssignRowsViewModel"
-
 class AssignRowsViewModel(application: Application) : AndroidViewModel(application) {
+    private val TAG = "AssignRowsViewModel"
     private val app: BerryHarvestApplication = getApplication() as BerryHarvestApplication
     private val assignmentRepository = app.repositoryProvider.assignmentRepository
     private val workerRepository = app.repositoryProvider.workerRepository
@@ -310,24 +309,10 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
      */
     suspend fun assignWorkerToRow(workerId: String, rowNumber: Int): Result<Boolean> {
         _isLoading.value = true
-        Log.d(TAG, "Starting assignWorkerToRow process with workerId=$workerId, rowNumber=$rowNumber")
 
         try {
-            // First log the worker details for diagnostics
-            val workerDetails = workerRepository.getById(workerId)
-            Log.d(TAG, "Worker details: ${workerDetails.getOrNull()?.fullName ?: "Not found"}")
-
-            // Create and configure the assignment object
-            val assignment = Assignment().apply {
-                this.workerId = workerId
-                this.rowNumber = rowNumber
-            }
-            Log.d(TAG, "Created assignment object: ${assignment._id}")
-
-            // Try to add the assignment
-            Log.d(TAG, "Calling assignmentRepository.add...")
-            val result = assignmentRepository.add(assignment)
-            Log.d(TAG, "assignmentRepository.add result: $result")
+            // Use repository method instead of direct Realm access
+            val result = assignmentRepository.assignWorkerToRow(workerId, rowNumber)
 
             return when (result) {
                 is Result.Success -> {
@@ -337,17 +322,16 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
                 is Result.Error -> {
                     Log.e(TAG, "Error assigning worker", result.exception)
                     _error.value = "Failed to assign worker: ${result.message}"
-                    Result.Error(result.exception, result.message)
+                    Result.Error(result.exception)
                 }
                 is Result.Loading -> Result.Loading
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Exception during assignWorkerToRow", e)
+            Log.e(TAG, "Error assigning worker", e)
             _error.value = "Error assigning worker: ${e.message}"
             return Result.Error(e)
         } finally {
             _isLoading.value = false
-            Log.d(TAG, "assignWorkerToRow process completed")
         }
     }
 
@@ -358,40 +342,24 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         _isLoading.value = true
 
         try {
-            val getResult = assignmentRepository.getById(assignmentId)
+            // Use repository method instead of direct Realm access
+            val result = assignmentRepository.moveWorkerToRow(assignmentId, newRowNumber)
 
-            return when (getResult) {
+            return when (result) {
                 is Result.Success -> {
-                    val assignment = getResult.data
-                    if (assignment != null) {
-                        assignment.rowNumber = newRowNumber
-                        val updateResult = assignmentRepository.update(assignment)
-
-                        when (updateResult) {
-                            is Result.Success -> {
-                                Log.d(TAG, "Worker moved to row: $newRowNumber")
-                                Result.Success(true)
-                            }
-                            is Result.Error -> {
-                                _error.value = "Помилка переміщення: ${updateResult.message}"
-                                Result.Error(updateResult.exception, updateResult.message)
-                            }
-                            is Result.Loading -> Result.Loading
-                        }
-                    } else {
-                        _error.value = "Призначення не знайдено"
-                        Result.Success(false)
-                    }
+                    Log.d(TAG, "Worker moved to row: $newRowNumber")
+                    Result.Success(true)
                 }
                 is Result.Error -> {
-                    _error.value = "Помилка пошуку призначення: ${getResult.message}"
-                    Result.Error(getResult.exception, getResult.message)
+                    Log.e(TAG, "Error moving worker", result.exception)
+                    _error.value = "Failed to move worker: ${result.message}"
+                    Result.Error(result.exception)
                 }
                 is Result.Loading -> Result.Loading
             }
         } catch (e: Exception) {
-            _error.value = "Помилка переміщення: ${e.message}"
             Log.e(TAG, "Error moving worker", e)
+            _error.value = "Error moving worker: ${e.message}"
             return Result.Error(e)
         } finally {
             _isLoading.value = false
@@ -429,13 +397,14 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * Delete all assignments for a row.
+     * Delete an entire row.
      */
-    suspend fun deleteRow(rowNumber: Int): Result<Boolean> {
+    suspend fun deleteEntireRow(rowNumber: Int): Result<Boolean> {
         _isLoading.value = true
 
         try {
-            val result = assignmentRepository.deleteByRow(rowNumber)
+            // Use repository method instead of direct Realm access
+            val result = assignmentRepository.completelyDeleteRow(rowNumber)
 
             return when (result) {
                 is Result.Success -> {
@@ -443,15 +412,15 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
                     Result.Success(true)
                 }
                 is Result.Error -> {
-                    _error.value = "Помилка видалення ряду: ${result.message}"
                     Log.e(TAG, "Error deleting row", result.exception)
-                    Result.Error(result.exception, result.message)
+                    _error.value = "Failed to delete row: ${result.message}"
+                    Result.Error(result.exception)
                 }
                 is Result.Loading -> Result.Loading
             }
         } catch (e: Exception) {
-            _error.value = "Помилка видалення ряду: ${e.message}"
             Log.e(TAG, "Error deleting row", e)
+            _error.value = "Error deleting row: ${e.message}"
             return Result.Error(e)
         } finally {
             _isLoading.value = false
@@ -468,5 +437,36 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
     override fun onCleared() {
         super.onCleared()
         // No need to close Realm here as it's managed by the repository
+    }
+
+    /**
+     * Check if a worker is already assigned to a row.
+     */
+    suspend fun checkWorkerAssignment(workerId: String): Result<Int> {
+        _isLoading.value = true
+
+        try {
+            // Use repository method instead of direct Realm access
+            val result = assignmentRepository.getWorkerAssignment(workerId)
+
+            return when (result) {
+                is Result.Success -> {
+                    val assignment = result.data
+                    Result.Success(assignment?.rowNumber ?: -1)
+                }
+                is Result.Error -> {
+                    Log.e(TAG, "Error checking worker assignment", result.exception)
+                    _error.value = "Failed to check worker assignment: ${result.message}"
+                    Result.Error(result.exception)
+                }
+                is Result.Loading -> Result.Loading
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking worker assignment", e)
+            _error.value = "Error checking worker assignment: ${e.message}"
+            return Result.Error(e)
+        } finally {
+            _isLoading.value = false
+        }
     }
 }

@@ -41,6 +41,7 @@ import kotlin.time.Duration.Companion.seconds
 abstract class BaseRepositoryImpl<T : RealmObject>(
     protected val application: Application,
     protected val networkManager: EnhancedNetworkManager,
+    protected val databaseTransactionManager: DatabaseTransactionManager,
     protected val entityType: String,
     protected val logTag: String
 ) : BaseRepository<T> {
@@ -135,31 +136,13 @@ abstract class BaseRepositoryImpl<T : RealmObject>(
 
     /**
      * Safely executes a database operation with proper error handling.
-     *
-     * @param block The operation to execute
-     * @return The result of the operation
      */
     protected suspend fun <R> withDatabaseContext(block: suspend (Realm) -> R): R {
-        return withContext(Dispatchers.IO) {
-            val realm = getRealm()
-            try {
-                block(realm)
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e // Don't catch cancellation
-
-                Log.e(logTag, "Database operation failed: ${e.message}", e)
-                _errorState.value = "Database operation failed: ${e.message}"
-                throw e
-            }
-        }
+        return databaseTransactionManager.executeQuery(block)
     }
 
     /**
      * Safely performs a write transaction with proper error handling and automatic retry on failures.
-     *
-     * @param maxRetries Maximum number of retries if the transaction fails
-     * @param block The transaction code to execute
-     * @return The result of the transaction
      */
     protected suspend fun <R> safeWrite(
         maxRetries: Int = MAX_RETRY_ATTEMPTS,
@@ -170,7 +153,7 @@ abstract class BaseRepositoryImpl<T : RealmObject>(
 
         while (attempts < maxRetries) {
             try {
-                return app.safeWriteTransaction(block)
+                return databaseTransactionManager.executeTransaction(block)
             } catch (e: Exception) {
                 if (e is CancellationException) throw e // Don't catch cancellation
 

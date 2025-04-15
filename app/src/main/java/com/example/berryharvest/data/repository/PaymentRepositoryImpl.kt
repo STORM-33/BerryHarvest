@@ -24,10 +24,12 @@ import java.util.UUID
  */
 class PaymentRepositoryImpl(
     application: Application,
-    networkManager: EnhancedNetworkManager
+    networkManager: EnhancedNetworkManager,
+    databaseTransactionManager: DatabaseTransactionManager
 ) : BaseRepositoryImpl<PaymentRecord>(
     application = application,
     networkManager = networkManager,
+    databaseTransactionManager = databaseTransactionManager,
     entityType = "payment",
     logTag = "PaymentRepository"
 ), PaymentRepository {

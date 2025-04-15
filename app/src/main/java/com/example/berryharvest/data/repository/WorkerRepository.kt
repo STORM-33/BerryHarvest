@@ -41,4 +41,24 @@ interface WorkerRepository : BaseRepository<Worker> {
      * Hard delete a worker (admin only).
      */
     suspend fun hardDelete(id: String): Result<Boolean>
+
+    /**
+     * Adds a worker with the provided details.
+     */
+    suspend fun addWorkerWithDetails(fullName: String, phoneNumber: String): Result<String>
+
+    /**
+     * Updates a worker with the provided details.
+     */
+    suspend fun updateWorkerWithDetails(id: String, fullName: String, phoneNumber: String): Result<Boolean>
+
+    /**
+     * Completely deletes a worker.
+     */
+    suspend fun completelyDeleteWorker(id: String): Result<Boolean>
+
+    /**
+     * Gets the next available sequence number for a worker.
+     */
+    suspend fun getNextSequenceNumber(): Int
 }

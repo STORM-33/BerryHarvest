@@ -344,6 +344,7 @@ class GatherFragment : Fragment() {
                         Toast.makeText(activity, "Кількість пінеток повинна бути більше 0", Toast.LENGTH_SHORT).show()
                     }
                     else -> {
+                        // Use ViewModel to save gather data
                         viewModel.saveGatherData(worker._id, rowNumber, numOfPunnets)
                     }
                 }
@@ -427,7 +428,7 @@ class GatherFragment : Fragment() {
             AlertDialog.Builder(requireContext())
                 .setTitle("Редагування запису")
                 .setView(dialogView)
-                .setPositiveButton("Зберегти") { _, _ ->
+                .setPositiveButton("Оновити") { _, _ ->
                     val numOfPunnetsText = punnetsEditText.text.toString()
                     val numOfPunnets = numOfPunnetsText.toIntOrNull()
 
@@ -442,7 +443,8 @@ class GatherFragment : Fragment() {
                             Toast.makeText(activity, "Кількість пінеток повинна бути більше 0", Toast.LENGTH_SHORT).show()
                         }
                         else -> {
-                            viewModel.updateGatherData(currentGather._id, numOfPunnets)
+                            // Use ViewModel to update gather
+                            viewModel.updateGatherDetails(gather._id, numOfPunnets)
                         }
                     }
                 }
@@ -456,7 +458,7 @@ class GatherFragment : Fragment() {
             .setTitle("Видалення запису")
             .setMessage("Ви впевнені, що хочете видалити цей запис?")
             .setPositiveButton("Так") { _, _ ->
-                viewModel.deleteGatherData(gather._id)
+                viewModel.deleteGather(gather._id)
             }
             .setNegativeButton("Ні", null)
             .show()

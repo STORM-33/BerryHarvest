@@ -24,10 +24,12 @@ import java.util.UUID
  */
 class GatherRepositoryImpl(
     application: Application,
-    networkManager: EnhancedNetworkManager
+    networkManager: EnhancedNetworkManager,
+    databaseTransactionManager: DatabaseTransactionManager
 ) : BaseRepositoryImpl<Gather>(
     application = application,
     networkManager = networkManager,
+    databaseTransactionManager = databaseTransactionManager,
     entityType = "gather",
     logTag = "GatherRepository"
 ), GatherRepository {
@@ -332,6 +334,80 @@ class GatherRepositoryImpl(
             Result.Success(todayPunnets)
         } catch (e: Exception) {
             Log.e(logTag, "Error getting worker's today production", e)
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Record a new gather with full details.
+     */
+    override suspend fun recordGather(workerId: String, rowNumber: Int, numOfPunnets: Int, punnetCost: Float): Result<String> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Starting record gather operation for worker $workerId, row $rowNumber")
+            var gatherId = ""
+
+            // Generate current timestamp
+            val currentDate = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+
+            safeWrite {
+                val newGather = copyToRealm(Gather().apply {
+                    _id = UUID.randomUUID().toString()
+                    this.workerId = workerId
+                    this.rowNumber = rowNumber
+                    this.numOfPunnets = numOfPunnets
+                    this.punnetCost = punnetCost
+                    this.dateTime = currentDate
+                    this.isSynced = networkManager.isNetworkAvailable()
+                    this.isDeleted = false
+                })
+                gatherId = newGather._id
+                Log.d(logTag, "Recorded gather: $gatherId")
+            }
+
+            // Track pending operation if offline
+            if (!networkManager.isNetworkAvailable()) {
+                addPendingOperation(
+                    PendingOperation.Add(gatherId, entityType)
+                )
+            }
+
+            Log.d(logTag, "Record gather operation completed successfully")
+            Result.Success(gatherId)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error in recordGather", e)
+            setError("Failed to record gather: ${e.message}")
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Update an existing gather record.
+     */
+    override suspend fun updateGatherDetails(gatherId: String, numOfPunnets: Int): Result<Boolean> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Starting update gather operation for gather $gatherId")
+
+            safeWrite {
+                val gather = query<Gather>("_id == $0", gatherId).first().find()
+                gather?.apply {
+                    this.numOfPunnets = numOfPunnets
+                    isSynced = networkManager.isNetworkAvailable()
+                    Log.d(logTag, "Updated gather: $gatherId with $numOfPunnets punnets")
+                }
+            }
+
+            // Track pending operation if offline
+            if (!networkManager.isNetworkAvailable()) {
+                addPendingOperation(
+                    PendingOperation.Update(gatherId, entityType)
+                )
+            }
+
+            Log.d(logTag, "Update gather operation completed successfully")
+            Result.Success(true)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error in updateGatherDetails", e)
+            setError("Failed to update gather: ${e.message}")
             Result.Error(e)
         }
     }

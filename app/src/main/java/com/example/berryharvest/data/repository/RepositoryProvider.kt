@@ -1,6 +1,7 @@
 package com.example.berryharvest.data.repository
 
 import android.app.Application
+import com.example.berryharvest.BerryHarvestApplication
 import com.example.berryharvest.data.network.EnhancedNetworkManager
 
 /**
@@ -10,23 +11,23 @@ import com.example.berryharvest.data.network.EnhancedNetworkManager
  */
 class RepositoryProvider(private val application: Application) {
     val networkManager = EnhancedNetworkManager(application)
+    val databaseTransactionManager = DatabaseTransactionManager(application as BerryHarvestApplication)
 
-    // Lazy initialization for all repositories using the new implementations
+    // Lazy initialization for all repositories with the transaction manager
     val workerRepository: WorkerRepository =
-        WorkerRepositoryImpl(application, networkManager)
+        WorkerRepositoryImpl(application, networkManager, databaseTransactionManager)
 
     val assignmentRepository: AssignmentRepository =
-        AssignmentRepositoryImpl(application, networkManager)
+        AssignmentRepositoryImpl(application, networkManager, databaseTransactionManager)
 
     val settingsRepository: SettingsRepository =
-        SettingsRepositoryImpl(application, networkManager)
+        SettingsRepositoryImpl(application, networkManager, databaseTransactionManager)
 
     val gatherRepository: GatherRepository =
-        GatherRepositoryImpl(application, networkManager)
+        GatherRepositoryImpl(application, networkManager, databaseTransactionManager)
 
-    // Mock the payment repository for now since we haven't implemented it
     val paymentRepository: PaymentRepository =
-        PaymentRepositoryImpl(application, networkManager)
+        PaymentRepositoryImpl(application, networkManager, databaseTransactionManager)
 
     /**
      * Close all repositories and release resources.
@@ -39,7 +40,6 @@ class RepositoryProvider(private val application: Application) {
         (gatherRepository as BaseRepositoryImpl<*>).close()
         (paymentRepository as BaseRepositoryImpl<*>).close()
     }
-
     /**
      * Synchronize all repositories with the server.
      * @return True if all syncs were successful
