@@ -500,4 +500,12 @@ class WorkerRepositoryImpl(
         val max = realm.query<Worker>().max<Int>("sequenceNumber").find()
         (max ?: 0) + 1
     }
+
+    override fun getEntityId(entity: Worker): String {
+        return entity._id
+    }
+
+    override fun MutableRealm.findEntityById(id: String): Worker? {
+        return this.query<Worker>("_id == $0", id).first().find()
+    }
 }

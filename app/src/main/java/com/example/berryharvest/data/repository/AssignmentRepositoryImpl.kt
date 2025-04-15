@@ -494,4 +494,12 @@ class AssignmentRepositoryImpl(
             Result.Error(e)
         }
     }
+
+    override fun getEntityId(entity: Assignment): String {
+        return entity._id
+    }
+
+    override fun MutableRealm.findEntityById(id: String): Assignment? {
+        return this.query<Assignment>("_id == $0", id).first().find()
+    }
 }

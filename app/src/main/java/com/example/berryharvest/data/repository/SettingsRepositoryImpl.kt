@@ -325,4 +325,12 @@ class SettingsRepositoryImpl(
             Log.e(logTag, "Error cleaning up duplicate settings", e)
         }
     }
+
+    override fun getEntityId(entity: Settings): String {
+        return entity._id
+    }
+
+    override fun MutableRealm.findEntityById(id: String): Settings? {
+        return this.query<Settings>("_id == $0", id).first().find()
+    }
 }

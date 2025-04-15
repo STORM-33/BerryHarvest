@@ -411,4 +411,12 @@ class GatherRepositoryImpl(
             Result.Error(e)
         }
     }
+
+    override fun getEntityId(entity: Gather): String {
+        return entity._id
+    }
+
+    override fun MutableRealm.findEntityById(id: String): Gather? {
+        return this.query<Gather>("_id == $0", id).first().find()
+    }
 }

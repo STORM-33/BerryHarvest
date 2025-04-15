@@ -261,15 +261,22 @@ abstract class BaseRepositoryImpl<T : RealmObject>(
             if (unsyncedCount > 0) {
                 Log.d(logTag, "Found $unsyncedCount unsynced $entityType entities")
 
-                // Try with a timeout to avoid indefinite waiting
-                withTimeout(10.seconds) {
-                    app.safeWriteTransaction {
-                        val unsyncedEntities = getUnsyncedQuery(realm).find()
-                        Log.d(logTag, "Processing ${unsyncedEntities.size} unsynced $entityType entities")
+                // Get IDs of unsynced entities before entering the write transaction
+                val unsyncedEntities = getUnsyncedQuery(realm).find()
+                val unsyncedIds = unsyncedEntities.map { getEntityId(it) }
 
-                        unsyncedEntities.forEach { entity ->
-                            markAsSynced(entity)
-                            Log.d(logTag, "Marked $entityType entity as synced")
+                if (unsyncedIds.isNotEmpty()) {
+                    // Try with a timeout to avoid indefinite waiting
+                    withTimeout(10.seconds) {
+                        app.safeWriteTransaction {
+                            for (id in unsyncedIds) {
+                                // Use the abstract method to find entity by ID
+                                val entity = findEntityById(id)
+                                if (entity != null) {
+                                    markAsSynced(entity)
+                                    Log.d(logTag, "Marked $entityType entity as synced: $id")
+                                }
+                            }
                         }
                     }
                 }
@@ -289,6 +296,10 @@ abstract class BaseRepositoryImpl<T : RealmObject>(
             Result.Error(e)
         }
     }
+
+    protected abstract fun getEntityId(entity: T): String
+
+    protected abstract fun MutableRealm.findEntityById(id: String): T?
 
     /**
      * Get the query to find unsynced entities.

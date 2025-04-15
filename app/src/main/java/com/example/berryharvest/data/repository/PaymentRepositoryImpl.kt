@@ -515,4 +515,12 @@ class PaymentRepositoryImpl(
             return Result.Error(e)
         }
     }
+
+    override fun getEntityId(entity: PaymentRecord): String {
+        return entity._id
+    }
+
+    override fun MutableRealm.findEntityById(id: String): PaymentRecord? {
+        return this.query<PaymentRecord>("_id == $0", id).first().find()
+    }
 }
