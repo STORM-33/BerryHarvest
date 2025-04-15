@@ -12,6 +12,7 @@ import com.example.berryharvest.data.model.PaymentBalance
 import com.example.berryharvest.data.model.PaymentRecord
 import com.example.berryharvest.data.model.Settings
 import com.example.berryharvest.data.sync.SyncManager
+import com.example.berryharvest.data.sync.SyncStatus
 import io.realm.kotlin.MutableRealm
 import io.realm.kotlin.Realm
 import io.realm.kotlin.RealmConfiguration
@@ -21,21 +22,16 @@ import io.realm.kotlin.mongodb.AppConfiguration
 import io.realm.kotlin.mongodb.Credentials
 import io.realm.kotlin.mongodb.subscriptions
 import io.realm.kotlin.mongodb.sync.SyncConfiguration
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.seconds
@@ -97,6 +93,9 @@ class BerryHarvestApplication : Application() {
         // Initialize sync manager after repositories
         syncManager = SyncManager(this, ProcessLifecycleOwner.get().lifecycleScope)
         syncManager.startSyncMonitoring()
+
+        // Monitor sync status
+        monitorSyncStatus()
 
         // Schedule periodic cleanup of unused Realm instances
         scheduleRealmInstanceCleanup()
@@ -469,6 +468,30 @@ class BerryHarvestApplication : Application() {
             } catch (e: Exception) {
                 Log.e("Realm", "Database operation failed: ${e.message}", e)
                 throw e
+            }
+        }
+    }
+
+    private fun monitorSyncStatus() {
+        CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
+            syncManager.syncStatus.collect { status ->
+                when (status) {
+                    is SyncStatus.InProgress -> {
+                        Log.d("SyncStatus", "Synchronization in progress")
+                        // Notify UI components if needed
+                    }
+                    is SyncStatus.Completed -> {
+                        Log.d("SyncStatus", "Synchronization completed successfully")
+                        // Refresh UI components
+                    }
+                    is SyncStatus.Failed -> {
+                        Log.e("SyncStatus", "Synchronization failed: ${status.reason}")
+                        // Show error notification if needed
+                    }
+                    is SyncStatus.Idle -> {
+                        // Nothing to do
+                    }
+                }
             }
         }
     }

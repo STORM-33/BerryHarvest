@@ -7,6 +7,9 @@ import com.example.berryharvest.data.repository.Result
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
@@ -31,6 +34,19 @@ class SyncManager(
     private val MAX_SYNC_ATTEMPTS = 3
     private val MIN_SYNC_INTERVAL = 10000L // 10 seconds minimum between syncs
 
+    // Add a sync status flow to allow UI components to observe sync state
+    private val _syncStatus = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
+    val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
+
+    // Track the number of pending operations
+    private val _pendingOperationsCount = MutableStateFlow(0)
+    val pendingOperationsCount: StateFlow<Int> = _pendingOperationsCount.asStateFlow()
+
+    init {
+        // Initialize pending operations count
+        updatePendingOperationsCount()
+    }
+
     fun startSyncMonitoring() {
         Log.d(TAG, "Starting sync monitoring")
 
@@ -52,6 +68,22 @@ class SyncManager(
 
         // Also schedule periodic sync attempts when online
         startPeriodicSyncJob()
+
+        // Schedule periodic updating of pending operations count
+        startPendingOperationsMonitoring()
+    }
+
+    private fun startPendingOperationsMonitoring() {
+        coroutineScope.launch {
+            while (true) {
+                updatePendingOperationsCount()
+                delay(30.seconds)
+            }
+        }
+    }
+
+    private fun updatePendingOperationsCount() {
+        _pendingOperationsCount.value = app.repositoryProvider.getTotalPendingOperationsCount()
     }
 
     private fun startPeriodicSyncJob() {
@@ -84,11 +116,16 @@ class SyncManager(
             return Result.Success(false)
         }
 
+        if (!silent) {
+            _syncStatus.value = SyncStatus.InProgress
+        }
+
         // Check if we've exceeded max attempts
         if (syncAttempts.incrementAndGet() > MAX_SYNC_ATTEMPTS) {
             Log.d(TAG, "Maximum sync attempts reached, resetting and skipping")
             syncAttempts.set(0)
             isSyncing.set(false)
+            _syncStatus.value = SyncStatus.Failed("Maximum sync attempts reached")
             return Result.Error(Exception("Maximum sync attempts reached"))
         }
 
@@ -97,6 +134,7 @@ class SyncManager(
                 Log.d(TAG, "No network available for sync")
                 syncAttempts.decrementAndGet()
                 isSyncing.set(false)
+                _syncStatus.value = SyncStatus.Failed("Network not available")
                 return Result.Error(Exception("Network not available"))
             }
 
@@ -104,55 +142,37 @@ class SyncManager(
 
             // Set timeout for the entire sync operation
             val result = withTimeout(30.seconds) {
-                val repositories = app.repositoryProvider
+                // Use the repositoryProvider's syncAllRepositories method
+                val success = app.repositoryProvider.syncAllRepositories()
 
-                // Sync workers
-                val workerResult = repositories.workerRepository.syncPendingChanges()
-
-                // Sync assignments
-                val assignmentResult = repositories.assignmentRepository.syncPendingChanges()
-
-                // Sync settings
-                val settingsResult = repositories.settingsRepository.syncPendingChanges()
-
-                // Sync payments - add this line
-                val paymentResult = repositories.paymentRepository.syncPendingChanges()
-
-                // Check results
-                val allSuccessful =
-                    workerResult is Result.Success &&
-                            assignmentResult is Result.Success &&
-                            settingsResult is Result.Success &&
-                            paymentResult is Result.Success // Add payment result check
-
-                if (allSuccessful) {
+                if (success) {
                     Log.d(TAG, "Sync completed successfully")
                     Result.Success(true)
                 } else {
-                    val errors = listOfNotNull(
-                        (workerResult as? Result.Error)?.message,
-                        (assignmentResult as? Result.Error)?.message,
-                        (settingsResult as? Result.Error)?.message,
-                        (paymentResult as? Result.Error)?.message // Add payment error
-                    ).joinToString("; ")
-
-                    Log.e(TAG, "Sync completed with errors: $errors")
-                    Result.Error(Exception("Sync errors: $errors"))
+                    Log.e(TAG, "Sync completed with errors")
+                    Result.Error(Exception("Sync completed with errors"))
                 }
             }
 
             // Reset attempts on success
             if (result is Result.Success) {
                 syncAttempts.set(0)
+                _syncStatus.value = SyncStatus.Completed
+                // Update pending operations count after successful sync
+                updatePendingOperationsCount()
+            } else {
+                _syncStatus.value = SyncStatus.Failed((result as? Result.Error)?.message ?: "Unknown error")
             }
 
             return result
 
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "Sync operation timed out after 30 seconds")
+            _syncStatus.value = SyncStatus.Failed("Sync timed out")
             return Result.Error(Exception("Sync timed out"))
         } catch (e: Exception) {
             Log.e(TAG, "Error during sync", e)
+            _syncStatus.value = SyncStatus.Failed(e.message ?: "Unknown error")
             return Result.Error(e)
         } finally {
             lastSyncTime.set(System.currentTimeMillis())
@@ -161,20 +181,20 @@ class SyncManager(
     }
 
     fun hasPendingChanges(): Boolean {
-        val repositories = app.repositoryProvider
-
-        return repositories.workerRepository.hasPendingOperations() ||
-                repositories.assignmentRepository.hasPendingOperations() ||
-                repositories.settingsRepository.hasPendingOperations() ||
-                repositories.paymentRepository.hasPendingOperations() // Add payment repository check
+        return app.repositoryProvider.hasPendingOperations()
     }
 
     fun getPendingChangesCount(): Int {
-        val repositories = app.repositoryProvider
-
-        return repositories.workerRepository.getPendingOperationsCount() +
-                repositories.assignmentRepository.getPendingOperationsCount() +
-                repositories.settingsRepository.getPendingOperationsCount() +
-                repositories.paymentRepository.getPendingOperationsCount() // Add payment repository count
+        return app.repositoryProvider.getTotalPendingOperationsCount()
     }
+}
+
+/**
+ * Represents the current status of the synchronization process.
+ */
+sealed class SyncStatus {
+    object Idle : SyncStatus()
+    object InProgress : SyncStatus()
+    object Completed : SyncStatus()
+    data class Failed(val reason: String) : SyncStatus()
 }
