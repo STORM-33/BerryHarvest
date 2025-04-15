@@ -1,31 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/assignmentContainer"
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:padding="8dp">
+    android:layout_marginHorizontal="2dp"
+    android:layout_marginVertical="1dp"
+    app:cardCornerRadius="2dp"
+    app:cardElevation="1dp">
 
-    <TextView
-        android:id="@+id/rowNumberTextView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Номер ряду"
-        android:textSize="18sp"
-        android:textStyle="bold" />
-
-    <!-- Worker List -->
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/workerRecyclerView"
+    <LinearLayout
+        android:id="@+id/assignmentContainer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:nestedScrollingEnabled="false" />
+        android:orientation="vertical"
+        android:padding="6dp">
 
-    <!-- Remove Row Button -->
-    <Button
-        android:id="@+id/removeRowButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Видалити ряд" />
+        <TextView
+            android:id="@+id/rowNumberTextView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:textStyle="bold" />
 
-</LinearLayout>
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/workerRecyclerView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:nestedScrollingEnabled="false" />
+
+        <Button
+            android:id="@+id/removeRowButton"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="24dp"
+            android:layout_gravity="end"
+            android:minWidth="60dp"
+            android:text="Видалити"
+            android:textColor="#F44336"
+            android:textSize="10sp"
+            android:visibility="gone" />
+    </LinearLayout>
+</androidx.cardview.widget.CardView>

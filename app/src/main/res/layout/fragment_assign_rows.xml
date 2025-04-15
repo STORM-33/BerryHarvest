@@ -1,96 +1,139 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="16dp">
+    android:padding="8dp">
 
-    <!-- Вся "шапка" с вводом, спиннером и кнопками -->
+    <!-- Compact input area -->
     <LinearLayout
-        android:id="@+id/assignWorkerLayout"
+        android:id="@+id/inputContainer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:gravity="start"
-        android:layout_marginTop="8dp"
-        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        app:layout_constraintTop_toTopOf="parent">
 
-        <!-- Row Selection (Ряд) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="8dp">
+            android:orientation="horizontal">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/rowNumberInputLayout"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="Ряд: "
-                android:textSize="16sp" />
+                android:layout_weight="0.5"
+                android:layout_marginEnd="4dp"
+                android:hint="Ряд">
 
-            <EditText
-                android:id="@+id/rowEditText"
-                android:layout_width="match_parent"
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/rowEditText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="number"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <FrameLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:hint="Номер ряду"
-                android:inputType="number"
-                android:maxLength="3"
-                android:layout_marginEnd="16dp" />
+                android:layout_weight="1.5"
+                android:layout_marginStart="4dp">
+
+                <com.example.berryharvest.ui.common.SearchableSpinnerView
+                    android:id="@+id/workerSearchView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </FrameLayout>
         </LinearLayout>
 
-        <!-- Worker Selection: Spinner + кнопка Видалити всі ряди -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginTop="8dp">
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal">
 
-            <com.example.berryharvest.ui.common.SearchableSpinnerView
-                android:id="@+id/workerSearchView"
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/assignButton"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginEnd="8dp" />
+                android:text="Призначити на ряд"
+                android:textSize="12sp"
+                app:cornerRadius="4dp"
+                android:padding="8dp"
+                android:minHeight="40dp" />
 
-        </LinearLayout>
-
-        <!-- Кнопка Призначити (с прогрессбаром) -->
-        <FrameLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp">
-
-            <Button
-                android:id="@+id/assignButton"
-                android:layout_width="wrap_content"
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/searchInputLayout"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="Призначити" />
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:hint="Пошук ряда"
+                app:startIconDrawable="@android:drawable/ic_menu_search">
 
-            <ProgressBar
-                android:id="@+id/loadingProgressBar"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:layout_gravity="center"
-                android:visibility="gone" />
-        </FrameLayout>
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/searchRowEditText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="number"
+                    android:maxLines="1" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
     </LinearLayout>
 
-    <!-- Список назначений (RecyclerView) -->
+    <View
+        android:id="@+id/divider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="8dp"
+        android:background="?android:attr/listDivider"
+        app:layout_constraintTop_toBottomOf="@id/inputContainer" />
+
+    <TextView
+        android:id="@+id/assignmentsTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Ряди та призначення"
+        android:textAppearance="?attr/textAppearanceSubtitle1"
+        android:textStyle="bold"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/divider" />
+
+    <TextView
+        android:id="@+id/rowCountTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:textSize="12sp"
+        app:layout_constraintBaseline_toBaselineOf="@id/assignmentsTitle"
+        app:layout_constraintStart_toEndOf="@id/assignmentsTitle" />
+
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/assignmentsRecyclerView"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="16dp"
-        app:layout_constraintTop_toBottomOf="@id/assignWorkerLayout"
-        app:layout_constraintStart_toStartOf="parent"
+        android:layout_marginTop="4dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/assignmentsTitle" />
+
+    <ProgressBar
+        android:id="@+id/loadingProgressBar"
+        style="?android:attr/progressBarStyle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent" />
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
-
 

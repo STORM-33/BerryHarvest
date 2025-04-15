@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -20,6 +21,7 @@ class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) :
         val idTextView: TextView = view.findViewById(R.id.textViewId)
         val fullNameTextView: TextView = view.findViewById(R.id.textViewFullName)
         val phoneNumberTextView: TextView = view.findViewById(R.id.textViewPhoneNumber)
+        val syncStatusIcon: ImageView = view.findViewById(R.id.syncStatusIcon)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): WorkerViewHolder {
@@ -32,27 +34,27 @@ class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) :
     override fun onBindViewHolder(holder: WorkerViewHolder, position: Int) {
         val worker = getItem(position)
 
-        // Format the display to include sequence number in same row
+        // Format the display to include sequence number
         holder.fullNameTextView.text = "${worker.fullName} [${worker.sequenceNumber}]"
-        holder.phoneNumberTextView.text = worker.phoneNumber
 
-        // Remove the separate ID text view since we're including the sequence number in the name
+        // Format phone number or show placeholder
+        holder.phoneNumberTextView.text = if (worker.phoneNumber.isNotEmpty()) {
+            worker.phoneNumber
+        } else {
+            "Номер не вказано"
+        }
+
+        // Remove the separate ID text view
         holder.idTextView.visibility = View.GONE
 
-        // More subtle background for unsynced workers
-        when {
-            worker.isDeleted -> holder.itemView.setBackgroundColor(Color.TRANSPARENT)
-            !worker.isSynced -> {
-                // Use a more subtle background color
-                holder.itemView.setBackgroundColor(Color.parseColor("#15FFC107")) // Very light amber with 10% opacity
-
-                // Add a small sync indicator
-                holder.fullNameTextView.setCompoundDrawablesWithIntrinsicBounds(0, 0, R.drawable.ic_sync_small, 0)
-            }
-            else -> {
-                holder.itemView.setBackgroundColor(Color.TRANSPARENT)
-                holder.fullNameTextView.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
-            }
+        // Show sync status indicator for unsynced workers
+        if (!worker.isSynced) {
+            holder.syncStatusIcon.visibility = View.VISIBLE
+            // Use a subtle background color for unsynced workers
+            holder.itemView.setBackgroundColor(Color.parseColor("#15FFC107")) // Very light amber
+        } else {
+            holder.syncStatusIcon.visibility = View.GONE
+            holder.itemView.setBackgroundColor(Color.TRANSPARENT)
         }
 
         // If worker has been deleted but not synced, add strikethrough and indicator
@@ -60,6 +62,7 @@ class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) :
         holder.fullNameTextView.paintFlags = paintFlags
         holder.phoneNumberTextView.paintFlags = paintFlags
 
+        // Enable long-click behavior for options menu
         holder.itemView.setOnLongClickListener {
             onItemLongClick(worker)
             true
@@ -73,7 +76,11 @@ class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) :
 
         @SuppressLint("DiffUtilEquals")
         override fun areContentsTheSame(oldItem: Worker, newItem: Worker): Boolean {
-            return oldItem == newItem && oldItem.isSynced == newItem.isSynced && oldItem.isDeleted == newItem.isDeleted
+            return oldItem.fullName == newItem.fullName &&
+                    oldItem.phoneNumber == newItem.phoneNumber &&
+                    oldItem.sequenceNumber == newItem.sequenceNumber &&
+                    oldItem.isSynced == newItem.isSynced &&
+                    oldItem.isDeleted == newItem.isDeleted
         }
     }
 }

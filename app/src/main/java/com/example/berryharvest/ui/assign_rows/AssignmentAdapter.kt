@@ -53,11 +53,11 @@ class AssignmentAdapter(
         val rowNumber = assignmentGroup.rowNumber
         val assignments = assignmentGroup.assignments
 
-        // Remove sync indicator from text and use more subtle approach
+        // Set row number text
         holder.rowNumberTextView.text = "Ряд $rowNumber"
 
         // Set up inner RecyclerView with the worker adapter
-        val workerAdapter = RefactoredWorkerInRowAdapter(
+        val workerAdapter = WorkerInRowAdapter(
             assignments,
             workerDetailsMap,
             onMoveWorkerClick
@@ -65,10 +65,10 @@ class AssignmentAdapter(
         holder.workerRecyclerView.layoutManager = LinearLayoutManager(holder.itemView.context)
         holder.workerRecyclerView.adapter = workerAdapter
 
-        // Set background color based on sync status - make it more subtle
+        // Set background color based on sync status
         val hasUnsyncedAssignments = assignments.any { !it.isSynced }
         if (hasUnsyncedAssignments) {
-            holder.container.setBackgroundColor(Color.parseColor("#15FFC107")) // Very light amber with 10% opacity
+            holder.container.setBackgroundColor(Color.parseColor("#15FFC107")) // Very light amber
             // Add a small sync icon
             holder.rowNumberTextView.setCompoundDrawablesWithIntrinsicBounds(0, 0, R.drawable.ic_sync_small, 0)
             Log.d("AssignmentAdapter", "Row $rowNumber is UNSYNCED")
@@ -84,7 +84,7 @@ class AssignmentAdapter(
             true
         }
 
-        // Hide the remove row button
+        // Hide the remove row button by default
         holder.removeRowButton.visibility = View.GONE
     }
 
@@ -124,50 +124,6 @@ class AssignmentAdapter(
 
             return oldIds == newIds
         }
-    }
-}
-
-/**
- * Refactored worker adapter that doesn't need direct Realm access
- */
-class RefactoredWorkerInRowAdapter(
-    private val assignments: List<Assignment>,
-    private val workerDetailsMap: Map<String, Worker>,
-    private val onMoveWorkerClick: (Assignment) -> Unit
-) : RecyclerView.Adapter<RefactoredWorkerInRowAdapter.WorkerViewHolder>() {
-
-    inner class WorkerViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-        val workerTextView: TextView = view.findViewById(R.id.workerTextView)
-    }
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): WorkerViewHolder {
-        val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_worker_in_row, parent, false)
-        return WorkerViewHolder(view)
-    }
-
-    override fun onBindViewHolder(holder: WorkerViewHolder, position: Int) {
-        val assignment = assignments[position]
-
-        // Get worker details from the map rather than from Realm directly
-        val worker = workerDetailsMap[assignment.workerId]
-
-        val workerInfo = if (worker != null) {
-            "${worker.fullName} (${worker.sequenceNumber})"
-        } else {
-            "Невідомий працівник"
-        }
-
-        holder.workerTextView.text = workerInfo
-
-        holder.workerTextView.setOnLongClickListener {
-            onMoveWorkerClick(assignment)
-            true
-        }
-    }
-
-    override fun getItemCount(): Int {
-        return assignments.size
     }
 }
 
