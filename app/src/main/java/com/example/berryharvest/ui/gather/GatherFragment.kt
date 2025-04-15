@@ -143,14 +143,6 @@ class GatherFragment : Fragment() {
             }
         }
 
-        // Observe success messages
-        viewModel.successMessage.observe(viewLifecycleOwner) { success ->
-            if (success) {
-                Toast.makeText(activity, "Дані збережено", Toast.LENGTH_SHORT).show()
-                viewModel.clearSuccessMessage()
-            }
-        }
-
         // Observe punnet price
         viewModel.punnetPrice.observe(viewLifecycleOwner) { price ->
             updatePriceDisplay(price)

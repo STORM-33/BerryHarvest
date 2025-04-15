@@ -25,7 +25,6 @@ class ReportFragment : Fragment() {
     // UI components
     private lateinit var swipeRefreshLayout: SwipeRefreshLayout
     private lateinit var loadingProgressBar: ProgressBar
-    private lateinit var connectionStatusTextView: TextView
 
     // Summary stats views
     private lateinit var totalPunnetsTextView: TextView
@@ -108,13 +107,6 @@ class ReportFragment : Fragment() {
             }
         }
 
-        // Observe connection state
-        lifecycleScope.launch {
-            viewModel.connectionState.collect { state ->
-                updateConnectionState(state)
-            }
-        }
-
         // Observe summary stats
         lifecycleScope.launch {
             viewModel.summaryStats.collect { stats ->
@@ -133,26 +125,6 @@ class ReportFragment : Fragment() {
         lifecycleScope.launch {
             viewModel.dailyProduction.collect { production ->
                 updateDailyProduction(production)
-            }
-        }
-    }
-
-    private fun updateConnectionState(state: ConnectionState) {
-        when (state) {
-            is ConnectionState.Connected -> {
-                connectionStatusTextView.text = "Підключено"
-                connectionStatusTextView.setBackgroundResource(R.drawable.rounded_status_background)
-                connectionStatusTextView.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_sync_small, 0, 0, 0)
-            }
-            is ConnectionState.Disconnected -> {
-                connectionStatusTextView.text = "Офлайн режим"
-                connectionStatusTextView.setBackgroundResource(R.drawable.rounded_status_background)
-                connectionStatusTextView.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_offline, 0, 0, 0)
-            }
-            is ConnectionState.Error -> {
-                connectionStatusTextView.text = "Помилка з'єднання"
-                connectionStatusTextView.setBackgroundResource(R.drawable.rounded_status_background)
-                connectionStatusTextView.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_offline, 0, 0, 0)
             }
         }
     }
