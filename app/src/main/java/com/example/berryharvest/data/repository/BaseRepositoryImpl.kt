@@ -14,6 +14,7 @@ import io.realm.kotlin.types.RealmObject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -135,43 +136,51 @@ abstract class BaseRepositoryImpl<T : RealmObject>(
     protected abstract fun createQueryById(realm: Realm, id: String): RealmQuery<T>
 
     /**
-     * Safely executes a database operation with proper error handling.
+     * Safely executes a database operation with proper thread management.
      */
     protected suspend fun <R> withDatabaseContext(block: suspend (Realm) -> R): R {
-        return databaseTransactionManager.executeQuery(block)
+        return withContext(Dispatchers.IO) {
+            val realm = getRealm()
+            try {
+                block(realm)
+            } catch (e: Exception) {
+                Log.e(logTag, "Database operation failed: ${e.message}", e)
+                throw e
+            }
+        }
     }
 
     /**
-     * Safely performs a write transaction with proper error handling and automatic retry on failures.
+     * Safely performs a write transaction with proper thread management and error handling.
      */
     protected suspend fun <R> safeWrite(
         maxRetries: Int = MAX_RETRY_ATTEMPTS,
         block: MutableRealm.() -> R
     ): R {
-        var attempts = 0
-        var lastException: Exception? = null
+        return withContext(Dispatchers.IO) {
+            var attempts = 0
+            var lastException: Exception? = null
 
-        while (attempts < maxRetries) {
-            try {
-                return databaseTransactionManager.executeTransaction(block)
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e // Don't catch cancellation
+            while (attempts < maxRetries) {
+                try {
+                    return@withContext databaseTransactionManager.executeTransaction(block)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e // Don't catch cancellation
 
-                lastException = e
-                Log.w(logTag, "Transaction failed (attempt ${attempts + 1}/$maxRetries): ${e.message}")
-                attempts++
+                    lastException = e
+                    Log.w(logTag, "Transaction failed (attempt ${attempts + 1}/$maxRetries): ${e.message}")
+                    attempts++
 
-                if (attempts < maxRetries) {
-                    // Exponential backoff
-                    val delayMs = (100L * (1 shl attempts))
-                    withContext(Dispatchers.IO) {
-                        kotlinx.coroutines.delay(delayMs)
+                    if (attempts < maxRetries) {
+                        // Exponential backoff
+                        val delayMs = (100L * (1 shl attempts))
+                        delay(delayMs)
                     }
                 }
             }
-        }
 
-        throw lastException ?: IllegalStateException("Transaction failed after $maxRetries attempts")
+            throw lastException ?: IllegalStateException("Transaction failed after $maxRetries attempts")
+        }
     }
 
     /**

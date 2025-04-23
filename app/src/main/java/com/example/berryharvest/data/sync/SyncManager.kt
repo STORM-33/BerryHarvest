@@ -5,6 +5,7 @@ import com.example.berryharvest.BerryHarvestApplication
 import com.example.berryharvest.data.repository.ConnectionState
 import com.example.berryharvest.data.repository.Result
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -109,6 +111,9 @@ class SyncManager(
         syncJobActive = false
     }
 
+    /**
+     * Performs synchronization in a non-blocking way with proper error handling
+     */
     suspend fun performSync(silent: Boolean = false): Result<Boolean> {
         // Prevent multiple simultaneous syncs
         if (isSyncing.getAndSet(true)) {
@@ -116,67 +121,80 @@ class SyncManager(
             return Result.Success(false)
         }
 
-        if (!silent) {
-            _syncStatus.value = SyncStatus.InProgress
-        }
-
-        // Check if we've exceeded max attempts
-        if (syncAttempts.incrementAndGet() > MAX_SYNC_ATTEMPTS) {
-            Log.d(TAG, "Maximum sync attempts reached, resetting and skipping")
-            syncAttempts.set(0)
-            isSyncing.set(false)
-            _syncStatus.value = SyncStatus.Failed("Maximum sync attempts reached")
-            return Result.Error(Exception("Maximum sync attempts reached"))
-        }
-
-        try {
-            if (!app.networkStatusManager.isNetworkAvailable()) {
-                Log.d(TAG, "No network available for sync")
-                syncAttempts.decrementAndGet()
-                isSyncing.set(false)
-                _syncStatus.value = SyncStatus.Failed("Network not available")
-                return Result.Error(Exception("Network not available"))
-            }
-
-            Log.d(TAG, "Starting sync process (attempt: ${syncAttempts.get()})")
-
-            // Set timeout for the entire sync operation
-            val result = withTimeout(30.seconds) {
-                // Use the repositoryProvider's syncAllRepositories method
-                val success = app.repositoryProvider.syncAllRepositories()
-
-                if (success) {
-                    Log.d(TAG, "Sync completed successfully")
-                    Result.Success(true)
-                } else {
-                    Log.e(TAG, "Sync completed with errors")
-                    Result.Error(Exception("Sync completed with errors"))
+        return withContext(Dispatchers.IO) {
+            try {
+                if (!silent) {
+                    withContext(Dispatchers.Main) {
+                        _syncStatus.value = SyncStatus.InProgress
+                    }
                 }
+
+                // Check if we've exceeded max attempts
+                if (syncAttempts.incrementAndGet() > MAX_SYNC_ATTEMPTS) {
+                    Log.d(TAG, "Maximum sync attempts reached, resetting and skipping")
+                    syncAttempts.set(0)
+                    withContext(Dispatchers.Main) {
+                        _syncStatus.value = SyncStatus.Failed("Maximum sync attempts reached")
+                    }
+                    return@withContext Result.Error(Exception("Maximum sync attempts reached"))
+                }
+
+                if (!app.networkStatusManager.isNetworkAvailable()) {
+                    Log.d(TAG, "No network available for sync")
+                    syncAttempts.decrementAndGet()
+                    withContext(Dispatchers.Main) {
+                        _syncStatus.value = SyncStatus.Failed("Network not available")
+                    }
+                    return@withContext Result.Error(Exception("Network not available"))
+                }
+
+                Log.d(TAG, "Starting sync process (attempt: ${syncAttempts.get()})")
+
+                // Set timeout for the entire sync operation
+                val result = withTimeout(30.seconds) {
+                    // Use the repositoryProvider's syncAllRepositories method
+                    val success = app.repositoryProvider.syncAllRepositories()
+
+                    if (success) {
+                        Log.d(TAG, "Sync completed successfully")
+                        Result.Success(true)
+                    } else {
+                        Log.e(TAG, "Sync completed with errors")
+                        Result.Error(Exception("Sync completed with errors"))
+                    }
+                }
+
+                // Reset attempts on success
+                if (result is Result.Success) {
+                    syncAttempts.set(0)
+                    withContext(Dispatchers.Main) {
+                        _syncStatus.value = SyncStatus.Completed
+                    }
+                    // Update pending operations count after successful sync
+                    updatePendingOperationsCount()
+                } else {
+                    withContext(Dispatchers.Main) {
+                        _syncStatus.value = SyncStatus.Failed((result as? Result.Error)?.message ?: "Unknown error")
+                    }
+                }
+
+                return@withContext result
+            } catch (e: TimeoutCancellationException) {
+                Log.e(TAG, "Sync operation timed out after 30 seconds")
+                withContext(Dispatchers.Main) {
+                    _syncStatus.value = SyncStatus.Failed("Sync timed out")
+                }
+                return@withContext Result.Error(Exception("Sync timed out"))
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during sync", e)
+                withContext(Dispatchers.Main) {
+                    _syncStatus.value = SyncStatus.Failed(e.message ?: "Unknown error")
+                }
+                return@withContext Result.Error(e)
+            } finally {
+                lastSyncTime.set(System.currentTimeMillis())
+                isSyncing.set(false)
             }
-
-            // Reset attempts on success
-            if (result is Result.Success) {
-                syncAttempts.set(0)
-                _syncStatus.value = SyncStatus.Completed
-                // Update pending operations count after successful sync
-                updatePendingOperationsCount()
-            } else {
-                _syncStatus.value = SyncStatus.Failed((result as? Result.Error)?.message ?: "Unknown error")
-            }
-
-            return result
-
-        } catch (e: TimeoutCancellationException) {
-            Log.e(TAG, "Sync operation timed out after 30 seconds")
-            _syncStatus.value = SyncStatus.Failed("Sync timed out")
-            return Result.Error(Exception("Sync timed out"))
-        } catch (e: Exception) {
-            Log.e(TAG, "Error during sync", e)
-            _syncStatus.value = SyncStatus.Failed(e.message ?: "Unknown error")
-            return Result.Error(e)
-        } finally {
-            lastSyncTime.set(System.currentTimeMillis())
-            isSyncing.set(false)
         }
     }
 

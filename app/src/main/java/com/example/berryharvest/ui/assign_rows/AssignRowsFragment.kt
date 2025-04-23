@@ -13,6 +13,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DividerItemDecoration
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.berryharvest.BaseFragment
 import com.example.berryharvest.BerryHarvestApplication
 import com.example.berryharvest.R
 import com.example.berryharvest.data.model.Assignment
@@ -29,7 +30,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-class AssignRowsFragment : Fragment() {
+class AssignRowsFragment : BaseFragment() {
     private val TAG = "AssignRowsFragment"
     private val viewModel: AssignRowsViewModel by viewModels()
 
@@ -237,7 +238,7 @@ class AssignRowsFragment : Fragment() {
 
     private fun observeViewModel() {
         // Observe assignments
-        viewLifecycleOwner.lifecycleScope.launch {
+        launchWhenStarted("assignments-flow") {
             viewModel.assignments.collect { assignments ->
                 Log.d(TAG, "Received ${assignments.size} assignment groups")
 
@@ -258,14 +259,14 @@ class AssignRowsFragment : Fragment() {
         }
 
         // Observe worker details
-        viewLifecycleOwner.lifecycleScope.launch {
+        launchWhenStarted("worker-details") {
             viewModel.workerDetails.collect { workerMap ->
                 assignmentAdapter.updateWorkerDetails(workerMap)
             }
         }
 
         // Observe errors
-        viewLifecycleOwner.lifecycleScope.launch {
+        launchWhenStarted("error-flow") {
             viewModel.error.collect { errorMessage ->
                 errorMessage?.let {
                     Toast.makeText(requireContext(), it, Toast.LENGTH_SHORT).show()
@@ -275,7 +276,7 @@ class AssignRowsFragment : Fragment() {
         }
 
         // Observe loading state
-        viewLifecycleOwner.lifecycleScope.launch {
+        launchWhenStarted("loading-state") {
             viewModel.isLoading.collect { isLoading ->
                 loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
                 assignButton.isEnabled = !isLoading

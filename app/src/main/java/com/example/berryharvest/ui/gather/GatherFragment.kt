@@ -19,6 +19,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import com.example.berryharvest.BaseFragment
 import com.example.berryharvest.R
 import com.example.berryharvest.data.model.Gather
 import com.example.berryharvest.data.model.Worker
@@ -29,7 +30,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-class GatherFragment : Fragment() {
+class GatherFragment : BaseFragment() {
     private lateinit var viewModel: GatherViewModel
 
     // UI components
@@ -149,21 +150,21 @@ class GatherFragment : Fragment() {
         }
 
         // Observe recent gathers
-        lifecycleScope.launch {
+        launchWhenStarted("gathers-flow") {
             viewModel.recentGathers.collect { gathers ->
                 updateGathersDisplay(gathers)
             }
         }
 
         // Observe today's stats
-        lifecycleScope.launch {
+        launchWhenStarted("stats") {
             viewModel.todayStats.collect { stats ->
                 updateStatsDisplay(stats)
             }
         }
 
         // Observe loading state
-        lifecycleScope.launch {
+        launchWhenStarted("loading-state") {
             viewModel.isLoading.collect { isLoading ->
                 loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
                 if (!isLoading) {
@@ -178,7 +179,7 @@ class GatherFragment : Fragment() {
         }
 
         // Observe unsynced count
-        lifecycleScope.launch {
+        launchWhenStarted("unsynced-count") {
             viewModel.unsyncedCount.collect { count ->
                 updateUnsyncedIndicator(count)
             }

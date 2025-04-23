@@ -75,6 +75,8 @@ class BerryHarvestApplication : Application() {
     // Flag to track if application is shutting down
     private val isShuttingDown = AtomicBoolean(false)
 
+
+
     // Models included in the Realm schema
     private val realmModels = setOf(
         Worker::class,

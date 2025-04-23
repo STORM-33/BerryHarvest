@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.berryharvest.BaseFragment
 import com.example.berryharvest.R
 import com.example.berryharvest.data.model.Worker
 import com.example.berryharvest.ui.common.SearchableSpinnerView
@@ -24,7 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-class PaymentFragment : Fragment() {
+class PaymentFragment : BaseFragment() {
 
     private lateinit var viewModel: PaymentViewModel
 
@@ -122,7 +123,7 @@ class PaymentFragment : Fragment() {
 
     private fun setupObservers() {
         // Observe selected worker
-        viewLifecycleOwner.lifecycleScope.launch {
+        launchWhenStarted("worker") {
             viewModel.selectedWorker.collect { worker ->
                 worker?.let {
                     showWorkerInfo(it)
@@ -135,21 +136,21 @@ class PaymentFragment : Fragment() {
         }
 
         // Observe balance
-        viewLifecycleOwner.lifecycleScope.launch {
+        launchWhenStarted("balance") {
             viewModel.workerBalance.collect { balance ->
                 updateBalanceDisplay(balance)
             }
         }
 
         // Observe today's punnet count
-        viewLifecycleOwner.lifecycleScope.launch {
+        launchWhenStarted("punnet-cost") {
             viewModel.todayPunnetCount.collect { count ->
                 todayPunnetsTextView.text = count.toString()
             }
         }
 
         // Observe payment history
-        viewLifecycleOwner.lifecycleScope.launch {
+        launchWhenStarted("payment-history") {
             viewModel.paymentHistory.collect { payments ->
                 paymentAdapter.submitList(payments)
 
@@ -164,14 +165,14 @@ class PaymentFragment : Fragment() {
         }
 
         // Observe loading state
-        viewLifecycleOwner.lifecycleScope.launch {
+        launchWhenStarted("loading-state") {
             viewModel.isLoading.collect { isLoading ->
                 loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
             }
         }
 
         // Observe errors
-        viewLifecycleOwner.lifecycleScope.launch {
+        launchWhenStarted("error-flow") {
             viewModel.error.collect { errorMessage ->
                 errorMessage?.let {
                     Toast.makeText(context, it, Toast.LENGTH_LONG).show()
@@ -181,7 +182,7 @@ class PaymentFragment : Fragment() {
         }
 
         // Observe success messages
-        viewLifecycleOwner.lifecycleScope.launch {
+        launchWhenStarted("success-flow") {
             viewModel.success.collect { successMessage ->
                 successMessage?.let {
                     Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
@@ -190,7 +191,7 @@ class PaymentFragment : Fragment() {
             }
         }
 
-        viewLifecycleOwner.lifecycleScope.launch {
+        launchWhenStarted("earnings") {
             viewModel.workerEarnings.collect { earnings ->
                 updateEarningsDisplay(earnings)
             }

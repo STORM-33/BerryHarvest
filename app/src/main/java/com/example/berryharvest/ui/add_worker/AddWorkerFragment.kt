@@ -16,6 +16,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DividerItemDecoration
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.berryharvest.BaseFragment
 import com.example.berryharvest.BerryHarvestApplication
 import com.example.berryharvest.R
 import com.example.berryharvest.data.model.Worker
@@ -30,7 +31,7 @@ import kotlinx.coroutines.withContext
 import java.util.UUID
 import java.util.regex.Pattern
 
-class AddWorkerFragment : Fragment() {
+class AddWorkerFragment : BaseFragment() {
     private val TAG = "AddWorkerFragment"
     private lateinit var viewModel: AddWorkerViewModel
 
@@ -91,9 +92,12 @@ class AddWorkerFragment : Fragment() {
             validateAndAddWorker()
         }
 
-        setupObservers()
-
         return view
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        setupObservers()
     }
 
     private fun setupRecyclerView() {
@@ -209,8 +213,7 @@ class AddWorkerFragment : Fragment() {
     }
 
     private fun setupObservers() {
-        // Observe workers
-        lifecycleScope.launch {
+        launchWhenStarted("workers-flow") {
             viewModel.workers.collect { workers ->
                 allWorkers = workers
 
@@ -228,7 +231,7 @@ class AddWorkerFragment : Fragment() {
         }
 
         // Observe loading state
-        lifecycleScope.launch {
+        launchWhenStarted("loading-state") {
             viewModel.isLoading.collect { isLoading ->
                 buttonAddWorker.isEnabled = !isLoading
                 loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
@@ -236,7 +239,7 @@ class AddWorkerFragment : Fragment() {
         }
 
         // Observe errors
-        lifecycleScope.launch {
+        launchWhenStarted("error-flow") {
             viewModel.error.collect { errorMessage ->
                 errorMessage?.let {
                     Toast.makeText(context, it, Toast.LENGTH_LONG).show()

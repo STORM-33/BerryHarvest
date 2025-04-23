@@ -13,12 +13,13 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import com.example.berryharvest.BaseFragment
 import com.example.berryharvest.R
 import com.example.berryharvest.data.repository.ConnectionState
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-class ReportFragment : Fragment() {
+class ReportFragment : BaseFragment() {
     private val TAG = "ReportFragment"
     private lateinit var viewModel: ReportViewModel
 
@@ -88,7 +89,7 @@ class ReportFragment : Fragment() {
 
     private fun setupObservers() {
         // Observe loading state
-        lifecycleScope.launch {
+        launchWhenStarted("loading-state") {
             viewModel.isLoading.collect { isLoading ->
                 loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
                 if (!isLoading) {
@@ -98,7 +99,7 @@ class ReportFragment : Fragment() {
         }
 
         // Observe error messages
-        lifecycleScope.launch {
+        launchWhenStarted("error-flow") {
             viewModel.errorMessage.collect { errorMessage ->
                 errorMessage?.let {
                     Toast.makeText(context, it, Toast.LENGTH_LONG).show()
@@ -108,21 +109,21 @@ class ReportFragment : Fragment() {
         }
 
         // Observe summary stats
-        lifecycleScope.launch {
+        launchWhenStarted("summary-stats") {
             viewModel.summaryStats.collect { stats ->
                 updateSummaryStats(stats)
             }
         }
 
         // Observe top workers
-        lifecycleScope.launch {
+        launchWhenStarted("top-workers") {
             viewModel.topWorkers.collect { workers ->
                 updateTopWorkers(workers)
             }
         }
 
         // Observe daily production
-        lifecycleScope.launch {
+        launchWhenStarted("daily-production") {
             viewModel.dailyProduction.collect { production ->
                 updateDailyProduction(production)
             }

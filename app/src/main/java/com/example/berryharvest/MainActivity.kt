@@ -36,7 +36,7 @@ import android.provider.Settings
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import com.example.berryharvest.data.model.Worker
-import com.example.berryharvest.utils.BadgeGenerator
+import com.example.berryharvest.util.BadgeGenerator
 import io.realm.kotlin.ext.query
 import java.io.File
 import java.text.SimpleDateFormat

@@ -1,4 +1,4 @@
-package com.example.berryharvest.utils
+package com.example.berryharvest.util
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -8,7 +8,6 @@ import com.example.berryharvest.data.model.Worker
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.MultiFormatWriter
-import com.google.zxing.common.BitMatrix
 import com.itextpdf.text.*
 import com.itextpdf.text.pdf.BaseFont
 import com.itextpdf.text.pdf.PdfContentByte
