@@ -1,10 +1,17 @@
 package com.example.berryharvest
 
 import android.util.Log
+import com.example.berryharvest.data.model.Assignment
+import com.example.berryharvest.data.model.Gather
+import com.example.berryharvest.data.model.PaymentBalance
+import com.example.berryharvest.data.model.PaymentRecord
+import com.example.berryharvest.data.model.Settings
+import com.example.berryharvest.data.model.Worker
 import io.realm.kotlin.Realm
 import io.realm.kotlin.RealmConfiguration
 import io.realm.kotlin.mongodb.App
 import io.realm.kotlin.mongodb.Credentials
+import io.realm.kotlin.ext.query
 import io.realm.kotlin.mongodb.sync.SyncConfiguration
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -111,18 +118,21 @@ class RealmManager(private val application: BerryHarvestApplication) {
         Log.d(TAG, "Login successful, configuring sync")
 
         // Configure sync with increased initial data download time (10 seconds)
-        // Configure sync with increased initial data download time (10 seconds)
-        val config = SyncConfiguration.Builder(
-            user,
-            application.realmModels
-        )
+        val config = SyncConfiguration.Builder(user, application.realmModels)
             .schemaVersion(1)
-            .initialSubscriptions { subscriptions ->
-                // Use the updated method with both parameters
-                application.setupInitialSubscriptions(subscriptions, realm)
+            .initialSubscriptions { realm ->
+                // 'this' is MutableSubscriptionSet
+                add(realm.query<Worker>(), "workers")
+                add(realm.query<Gather>(), "gathers")
+                add(realm.query<Assignment>(), "assignments")
+                add(realm.query<Settings>(), "settings")
+                add(realm.query<PaymentRecord>(), "payment_records")
+                add(realm.query<PaymentBalance>(), "payment_balances")
             }
-            .waitForInitialRemoteData(INITIAL_SYNC_TIMEOUT) // Increased from 1 second to 10 seconds
+            .waitForInitialRemoteData(INITIAL_SYNC_TIMEOUT)
             .build()
+
+
 
         Log.d(TAG, "Opening synced Realm")
 

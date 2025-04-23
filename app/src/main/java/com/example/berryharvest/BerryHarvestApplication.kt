@@ -18,6 +18,7 @@ import io.realm.kotlin.ext.query
 import io.realm.kotlin.mongodb.App
 import io.realm.kotlin.mongodb.AppConfiguration
 import io.realm.kotlin.mongodb.subscriptions
+import io.realm.kotlin.mongodb.sync.MutableSubscriptionSet
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -94,6 +95,7 @@ class BerryHarvestApplication : Application() {
 
         // Schedule periodic cleanup of unused Realm instances
         scheduleRealmInstanceCleanup()
+
     }
 
     /**
@@ -111,14 +113,13 @@ class BerryHarvestApplication : Application() {
      * Sets up initial subscriptions for the synced Realm.
      * This is extracted to a method to make it reusable.
      */
-    fun setupInitialSubscriptions(subscriptions: io.realm.kotlin.mongodb.subscriptions.MutableSubscriptionSet, realm: Realm) {
-        // Keep subscriptions minimal but with named subscriptions
-        subscriptions.add(realm.query<Worker>(), "workers")
-        subscriptions.add(realm.query<Gather>(), "gathers")
-        subscriptions.add(realm.query<Assignment>(), "assignments")
-        subscriptions.add(realm.query<Settings>(), "settings")
-        subscriptions.add(realm.query<PaymentRecord>(), "payment_records")
-        subscriptions.add(realm.query<PaymentBalance>(), "payment_balances")
+    fun MutableSubscriptionSet.setupInitialSubscriptions(realm: Realm) {
+        add(realm.query<Worker>(), "workers")
+        add(realm.query<Gather>(), "gathers")
+        add(realm.query<Assignment>(), "assignments")
+        add(realm.query<Settings>(), "settings")
+        add(realm.query<PaymentRecord>(), "payment_records")
+        add(realm.query<PaymentBalance>(), "payment_balances")
     }
 
     /**
