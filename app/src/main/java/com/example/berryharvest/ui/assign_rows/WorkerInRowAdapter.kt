@@ -33,7 +33,7 @@ class WorkerInRowAdapter(
         val worker = workerDetailsMap[assignment.workerId]
 
         val workerInfo = if (worker != null) {
-            "${worker.fullName} [${worker.sequenceNumber}]"
+            "[${worker.sequenceNumber}] ${worker.fullName}"
         } else {
             "Невідомий працівник"
         }

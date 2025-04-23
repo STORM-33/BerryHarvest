@@ -202,7 +202,7 @@ class PaymentFragment : Fragment() {
     }
 
     private fun showWorkerInfo(worker: Worker) {
-        workerNameTextView.text = "${worker.fullName} [${worker.sequenceNumber}]"
+        workerNameTextView.text = "[${worker.sequenceNumber}] ${worker.fullName}"
         workerInfoCard.visibility = View.VISIBLE
         paymentHistoryTitle.visibility = View.VISIBLE
         paymentHistoryRecyclerView.visibility = View.VISIBLE

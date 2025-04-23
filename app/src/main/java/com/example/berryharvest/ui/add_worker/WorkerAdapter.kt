@@ -35,7 +35,7 @@ class WorkerAdapter(private val onItemLongClick: (Worker) -> Unit) :
         val worker = getItem(position)
 
         // Format the display to include sequence number
-        holder.fullNameTextView.text = "${worker.fullName} [${worker.sequenceNumber}]"
+        holder.fullNameTextView.text = "[${worker.sequenceNumber}] ${worker.fullName}"
 
         // Format phone number or show placeholder
         holder.phoneNumberTextView.text = if (worker.phoneNumber.isNotEmpty()) {

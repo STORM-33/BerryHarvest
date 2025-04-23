@@ -9,6 +9,6 @@ fun Worker.toSearchableItem(): WorkerSearchableItem {
 data class WorkerSearchableItem(
     val worker: Worker
 ) : SearchableItem {
-    override fun getDisplayText(): String = "${worker.fullName} (${worker.sequenceNumber})"
-    override fun getSearchableText(): String = "${worker.fullName} ${worker.sequenceNumber}"
+    override fun getDisplayText(): String = "[${worker.sequenceNumber}] ${worker.fullName}"
+    override fun getSearchableText(): String =  "${worker.sequenceNumber} ${worker.fullName}"
 }

@@ -35,6 +35,9 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
+    private val _dataInitialized = MutableStateFlow(false)
+    val dataInitialized: StateFlow<Boolean> = _dataInitialized.asStateFlow()
+
     // New Flow for worker details, exposed to the UI
     private val _workerDetails = MutableStateFlow<Map<String, Worker>>(mapOf())
     val workerDetails: StateFlow<Map<String, Worker>> = _workerDetails.asStateFlow()
@@ -153,6 +156,9 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun loadInitialData() {
+        // Only load if not already initialized
+        if (_dataInitialized.value) return
+
         viewModelScope.launch {
             try {
                 _isLoading.value = true
@@ -160,6 +166,11 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
                 // Get direct reference to Realm
                 val app = getApplication() as BerryHarvestApplication
                 val realm = app.getRealmInstance()
+
+                // First load workers to ensure they're available for display
+                val workers = realm.query<Worker>().find().toList()
+                _allWorkers.value = workers
+                Log.d(TAG, "Pre-loaded ${workers.size} workers for UI")
 
                 // Load assignments directly
                 val assignments = realm.query<Assignment>().find()
@@ -180,11 +191,25 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
                     updateWorkerDetails(groupedAssignments)
                 }
 
-                _isLoading.value = false
+                _dataInitialized.value = true
+
             } catch (e: Exception) {
                 Log.e(TAG, "Error in loadInitialData", e)
-                _isLoading.value = false
                 _error.value = "Помилка завантаження даних: ${e.message}"
+            } finally {
+                // Always ensure loading state is reset
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun ensureLoadingStateReset() {
+        viewModelScope.launch {
+            if (_isLoading.value) {
+                // Give a short delay for any ongoing operation to complete
+                delay(300)
+                _isLoading.value = false
+                Log.d(TAG, "Force reset loading state to avoid UI being stuck")
             }
         }
     }

@@ -313,7 +313,7 @@ class GatherFragment : Fragment() {
         // Use consistent price format with decimal point
         val formattedPrice = String.format(Locale.getDefault(), "%.2f", viewModel.punnetPrice.value ?: 0f)
 
-        workerNameTextView.text = "${worker.fullName} [${worker.sequenceNumber}]"
+        workerNameTextView.text = "[${worker.sequenceNumber}] ${worker.fullName}"
         rowNumberTextView.text = "Ряд: $rowNumber"
         punnetsEditText.setText("10")
         priceTextView.text = "Ціна за пінетку: $formattedPrice₴"

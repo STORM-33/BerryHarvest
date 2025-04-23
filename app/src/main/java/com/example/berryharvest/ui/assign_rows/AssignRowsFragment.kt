@@ -24,6 +24,7 @@ import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import io.realm.kotlin.ext.query
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -77,9 +78,34 @@ class AssignRowsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        // Setup initial visibility to handle first load better
+        loadingProgressBar.visibility = View.VISIBLE
+
+        // Observe when data is initialized
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.dataInitialized.collect { initialized ->
+                if (initialized) {
+                    // Only hide loading when data is actually initialized
+                    loadingProgressBar.visibility = View.GONE
+                }
+            }
+        }
+
+        // Make sure loading state is observed early
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.isLoading.collect { isLoading ->
+                loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
+                assignButton.isEnabled = !isLoading
+            }
+        }
+
         // Force initial data load when the view is created
         viewLifecycleOwner.lifecycleScope.launch {
             viewModel.loadInitialData()
+
+            // Add safety mechanism to ensure loading state isn't stuck
+            delay(1500) // Give enough time for normal loading to complete
+            viewModel.ensureLoadingStateReset()
         }
     }
 
@@ -95,6 +121,9 @@ class AssignRowsFragment : Fragment() {
         // Reset the searchable spinner completely
         workerSearchView.clearSelection()
         selectedWorker = null
+
+        // Ensure loading state is reset if it gets stuck
+        viewModel.ensureLoadingStateReset()
     }
 
     private fun setupUI() {
@@ -255,11 +284,37 @@ class AssignRowsFragment : Fragment() {
     }
 
     private fun setupWorkerSearch() {
+        // Reset the spinner state first
+        workerSearchView.clearSelection()
+        selectedWorker = null
+
+        // Set up a flag to track if adapter has been initialized
+        var adapterInitialized = false
+
         viewLifecycleOwner.lifecycleScope.launch {
             // Observe all workers for search
             viewModel.allWorkers.collect { workers ->
-                Log.d(TAG, "Loaded ${workers.size} workers")
-                workerSearchView.setAdapter(workers.map { it.toSearchableItem() })
+                if (workers.isEmpty()) {
+                    Log.d(TAG, "Worker list is empty, waiting for data")
+                    return@collect
+                }
+
+                Log.d(TAG, "Setting up worker search with ${workers.size} workers")
+
+                // Create a fresh adapter each time but only if we have workers
+                val searchableItems = workers.map { it.toSearchableItem() }
+
+                // Only set adapter if it wasn't already set with non-empty data
+                if (!adapterInitialized || searchableItems.isNotEmpty()) {
+                    workerSearchView.setAdapter(searchableItems)
+                    adapterInitialized = true
+
+                    // Reset selection when adapter changes
+                    workerSearchView.clearSelection()
+                    selectedWorker = null
+                }
+
+                // Set the listener each time to ensure it's registered
                 workerSearchView.setOnItemSelectedListener { searchableItem ->
                     val workerItem = searchableItem as WorkerSearchableItem
                     selectedWorker = workerItem.worker
@@ -326,7 +381,7 @@ class AssignRowsFragment : Fragment() {
 
         AlertDialog.Builder(requireContext())
             .setTitle("Зміна призначення")
-            .setMessage("${worker.fullName} вже на ряду $currentRow. Змінити на ряд $rowNumber?")
+            .setMessage("[${worker.sequenceNumber}] ${worker.fullName} вже на ряду $currentRow. Змінити на ряд $rowNumber?")
             .setPositiveButton("Так") { _, _ ->
                 proceedWithAssignment(worker)
             }
@@ -355,8 +410,8 @@ class AssignRowsFragment : Fragment() {
                         selectedWorker = null
 
                         // Clear row number
-                        rowEditText.text?.clear()
-                        rowNumberInputLayout.error = null
+                        // rowEditText.text?.clear()
+                        // rowNumberInputLayout.error = null
 
                         // If searching for this row, make sure it stays visible
                         val searchQuery = searchRowEditText.text.toString()

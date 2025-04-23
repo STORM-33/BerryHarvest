@@ -1,9 +1,11 @@
 package com.example.berryharvest
 
-import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
@@ -27,7 +29,18 @@ import io.realm.kotlin.Realm
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import pub.devrel.easypermissions.EasyPermissions
 import java.util.Locale
+import android.Manifest
+import android.provider.Settings
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
+import com.example.berryharvest.data.model.Worker
+import com.example.berryharvest.utils.BadgeGenerator
+import io.realm.kotlin.ext.query
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 
 class MainActivity : AppCompatActivity() {
 
@@ -38,6 +51,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var networkStatusIndicator: TextView
     private lateinit var offlineBanner: TextView
     private var syncSnackbar: Snackbar? = null
+
+    private val REQUEST_STORAGE_PERMISSION = 101
+    private val BADGE_FOLDER = "BerryHarvest_Badges"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -303,8 +319,8 @@ class MainActivity : AppCompatActivity() {
                 startNewWorkday()
                 true
             }
-            R.id.action_settings -> {
-                // Handle settings
+            R.id.action_generate_badges -> {
+                handleGenerateBadges()
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -500,6 +516,200 @@ class MainActivity : AppCompatActivity() {
         return navController.navigateUp(appBarConfiguration) || super.onSupportNavigateUp()
     }
 
+    private fun handleGenerateBadges() {
+        if (hasStoragePermission()) {
+            generateWorkerBadges()
+        } else {
+            requestStoragePermission()
+        }
+    }
+
+    private fun hasStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            EasyPermissions.hasPermissions(
+                this,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+        }
+    }
+
+    private fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                val uri = Uri.fromParts("package", packageName, null)
+                intent.data = uri
+                storagePermissionLauncher.launch(intent)
+            } catch (e: Exception) {
+                val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                storagePermissionLauncher.launch(intent)
+            }
+        } else {
+            EasyPermissions.requestPermissions(
+                this,
+                "Потрібен доступ до сховища для збереження бейджів",
+                REQUEST_STORAGE_PERMISSION,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+        }
+    }
+
+    private val storagePermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (hasStoragePermission()) {
+            generateWorkerBadges()
+        } else {
+            Toast.makeText(
+                this,
+                "Дозвіл на доступ до сховища необхідний для створення бейджів",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun generateWorkerBadges() {
+        // Show progress dialog
+        val progressDialog = AlertDialog.Builder(this)
+            .setTitle("Генерація бейджів")
+            .setMessage("Створення PDF файлу з бейджами...")
+            .setCancelable(false)
+            .create()
+
+        progressDialog.show()
+
+        lifecycleScope.launch {
+            try {
+                // Get workers from repository
+                val workerRepository = (application as BerryHarvestApplication).repositoryProvider.workerRepository
+
+                // Get all workers in a suspending function
+                val workersResult = withContext(Dispatchers.IO) {
+                    val realm = (application as BerryHarvestApplication).getRealmInstance()
+                    realm.query<Worker>("isDeleted == false").find().toList()
+                }
+
+                if (workersResult.isEmpty()) {
+                    progressDialog.dismiss()
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Немає активних працівників для створення бейджів",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    return@launch
+                }
+
+                // Create a directory for badges in Documents
+                val badgesDir = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), BADGE_FOLDER)
+                } else {
+                    File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS),
+                        BADGE_FOLDER
+                    )
+                }
+
+                if (!badgesDir.exists()) {
+                    badgesDir.mkdirs()
+                }
+
+                // Create filename with timestamp
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                val filename = "worker_badges_$timestamp.pdf"
+                val outputFile = File(badgesDir, filename)
+
+                // Generate badges
+                val badgeGenerator = BadgeGenerator(this@MainActivity)
+                val file = withContext(Dispatchers.IO) {
+                    badgeGenerator.generateBadgesPdf(
+                        workersResult,
+                        outputFile.absolutePath,
+                        R.drawable.ic_launcher_foreground // Use your app icon or logo
+                    )
+                }
+
+                progressDialog.dismiss()
+                showBadgeGenerationSuccessDialog(file)
+
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    progressDialog.dismiss()
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Помилка: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun showBadgeGenerationSuccessDialog(file: File) {
+        AlertDialog.Builder(this)
+            .setTitle("Бейджі створено")
+            .setMessage("PDF файл збережено у:\n${file.absolutePath}")
+            .setPositiveButton("Відкрити") { _, _ ->
+                openPdfFile(file)
+            }
+            .setNeutralButton("Поділитися") { _, _ ->
+                sharePdfFile(file)
+            }
+            .setNegativeButton("Закрити", null)
+            .show()
+    }
+
+    // Method to open the PDF file
+    private fun openPdfFile(file: File) {
+        try {
+            val uri = FileProvider.getUriForFile(
+                this,
+                "${applicationContext.packageName}.provider",
+                file
+            )
+
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/pdf")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(
+                this,
+                "Не вдалося відкрити файл: ${e.message}",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    // Method to share the PDF file
+    private fun sharePdfFile(file: File) {
+        try {
+            val uri = FileProvider.getUriForFile(
+                this,
+                "${applicationContext.packageName}.provider",
+                file
+            )
+
+            val shareIntent = Intent().apply {
+                action = Intent.ACTION_SEND
+                putExtra(Intent.EXTRA_STREAM, uri)
+                type = "application/pdf"
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+
+            startActivity(Intent.createChooser(shareIntent, "Поділитися бейджами"))
+        } catch (e: Exception) {
+            Toast.makeText(
+                this,
+                "Не вдалося поділитися файлом: ${e.message}",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
 
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -507,6 +717,19 @@ class MainActivity : AppCompatActivity() {
 
         for (fragment in supportFragmentManager.fragments) {
             fragment.onActivityResult(requestCode, resultCode, data)
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        EasyPermissions.onRequestPermissionsResult(requestCode, permissions, grantResults, this)
+
+        if (requestCode == REQUEST_STORAGE_PERMISSION && hasStoragePermission()) {
+            generateWorkerBadges()
         }
     }
 

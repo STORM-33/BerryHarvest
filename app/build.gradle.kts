@@ -37,11 +37,19 @@ android {
     buildFeatures {
         viewBinding = true
     }
+    sourceSets {
+        getByName("main") {
+            assets.srcDirs("src/main/assets")
+        }
+    }
     buildToolsVersion = "35.0.0"
     ndkVersion = "25.1.8937393"
 }
 
 dependencies {
+    implementation("com.itextpdf:itextpdf:5.5.13.3")
+    implementation("com.google.zxing:core:3.5.1")
+    implementation("pub.devrel:easypermissions:3.0.0")
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.0")
     implementation("io.realm.kotlin:library-base:1.11.0")
     implementation("io.realm.kotlin:library-sync:1.11.0")

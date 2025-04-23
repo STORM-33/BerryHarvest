@@ -61,13 +61,48 @@ class WorkerRepositoryImpl(
     }
 
     /**
-     * Find a worker by QR code.
+     * Find a worker by QR code with enhanced error handling and logging.
      */
     override suspend fun getWorkerByQrCode(qrCode: String): Result<Worker?> = withDatabaseContext { realm ->
         try {
             Log.d(logTag, "Finding worker by QR code: $qrCode")
+
+            // First try exact match on the qrCode field
             val worker = realm.query<Worker>("qrCode == $0 AND isDeleted == false", qrCode).first().find()
-            Result.Success(worker)
+            if (worker != null) {
+                Log.d(logTag, "Found worker by exact QR match: ${worker.fullName}")
+                return@withDatabaseContext Result.Success(worker)
+            }
+
+            // If not found, check if the QR code might be a worker ID directly
+            Log.d(logTag, "Worker not found by QR code, trying as direct ID")
+            val workerById = realm.query<Worker>("_id == $0 AND isDeleted == false", qrCode).first().find()
+            if (workerById != null) {
+                Log.d(logTag, "Found worker by treating QR as ID: ${workerById.fullName}")
+                return@withDatabaseContext Result.Success(workerById)
+            }
+
+            // If the QR code is in format "WORKER-{id}-{timestamp}", extract the ID
+            if (qrCode.startsWith("WORKER-")) {
+                try {
+                    val parts = qrCode.split("-")
+                    if (parts.size >= 2) {
+                        val workerId = parts[1]
+                        Log.d(logTag, "Extracted worker ID from QR: $workerId")
+
+                        val workerByExtractedId = realm.query<Worker>("_id == $0 AND isDeleted == false", workerId).first().find()
+                        if (workerByExtractedId != null) {
+                            Log.d(logTag, "Found worker by extracted ID: ${workerByExtractedId.fullName}")
+                            return@withDatabaseContext Result.Success(workerByExtractedId)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(logTag, "Error parsing worker ID from QR", e)
+                }
+            }
+
+            Log.d(logTag, "Worker not found by any method for QR: $qrCode")
+            Result.Success(null)
         } catch (e: Exception) {
             Log.e(logTag, "Error finding worker by QR code", e)
             setError("Error finding worker: ${e.message}")
