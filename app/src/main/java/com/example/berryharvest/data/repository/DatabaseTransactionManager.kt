@@ -25,12 +25,13 @@ class DatabaseTransactionManager(private val application: BerryHarvestApplicatio
     /**
      * Executes a query operation safely.
      *
+     * @param contextKey Optional key to identify the context of Realm use
      * @param block The query code to execute
      * @return The result of the query
      */
-    suspend fun <T> executeQuery(block: suspend (Realm) -> T): T {
+    suspend fun <T> executeQuery(contextKey: String = "default", block: suspend (Realm) -> T): T {
         return withContext(Dispatchers.IO) {
-            val realm = application.getRealmInstance()
+            val realm = application.getRealmInstance(contextKey)
             block(realm)
         }
     }

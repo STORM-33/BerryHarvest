@@ -12,16 +12,12 @@ import com.example.berryharvest.data.model.PaymentBalance
 import com.example.berryharvest.data.model.PaymentRecord
 import com.example.berryharvest.data.model.Settings
 import com.example.berryharvest.data.sync.SyncManager
-import com.example.berryharvest.data.sync.SyncStatus
 import io.realm.kotlin.MutableRealm
 import io.realm.kotlin.Realm
-import io.realm.kotlin.RealmConfiguration
 import io.realm.kotlin.ext.query
 import io.realm.kotlin.mongodb.App
 import io.realm.kotlin.mongodb.AppConfiguration
-import io.realm.kotlin.mongodb.Credentials
 import io.realm.kotlin.mongodb.subscriptions
-import io.realm.kotlin.mongodb.sync.SyncConfiguration
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -30,12 +26,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.time.Duration.Companion.seconds
 
 /**
  * Main application class responsible for initializing global dependencies
@@ -71,7 +63,7 @@ class BerryHarvestApplication : Application() {
     private val isShuttingDown = AtomicBoolean(false)
 
     // Models included in the Realm schema
-    private val realmModels = setOf(
+    val realmModels = setOf(
         Worker::class,
         Gather::class,
         Assignment::class,
@@ -80,8 +72,8 @@ class BerryHarvestApplication : Application() {
         PaymentBalance::class
     )
 
-    // Realm instance management
-    private val realmInstanceManager = RealmInstanceManager()
+    // Updated: Replace RealmInstanceManager with RealmManager
+    val realmManager = RealmManager(this)
 
     /**
      * Creates an error handler for coroutines to prevent crashes from uncaught exceptions
@@ -100,24 +92,33 @@ class BerryHarvestApplication : Application() {
         syncManager = SyncManager(this, ProcessLifecycleOwner.get().lifecycleScope)
         syncManager.startSyncMonitoring()
 
-        // Monitor sync status
-        monitorSyncStatus()
-
         // Schedule periodic cleanup of unused Realm instances
         scheduleRealmInstanceCleanup()
     }
 
     /**
-     * Gets a Realm instance for the current thread.
+     * Gets a Realm instance.
+     * Uses the RealmManager to get a Realm instance with proper lifecycle management.
      *
-     * If a cached instance exists and is valid, it will be returned.
-     * Otherwise, a new instance will be created.
-     *
+     * @param contextKey An optional key to identify the context of the Realm use
      * @return A valid Realm instance
-     * @throws IllegalStateException if Realm initialization fails
      */
-    internal suspend fun getRealmInstance(): Realm {
-        return realmInstanceManager.getRealmInstance()
+    suspend fun getRealmInstance(contextKey: String = "default"): Realm {
+        return realmManager.getInstance(contextKey)
+    }
+
+    /**
+     * Sets up initial subscriptions for the synced Realm.
+     * This is extracted to a method to make it reusable.
+     */
+    fun setupInitialSubscriptions(subscriptions: io.realm.kotlin.mongodb.subscriptions.MutableSubscriptionSet, realm: Realm) {
+        // Keep subscriptions minimal but with named subscriptions
+        subscriptions.add(realm.query<Worker>(), "workers")
+        subscriptions.add(realm.query<Gather>(), "gathers")
+        subscriptions.add(realm.query<Assignment>(), "assignments")
+        subscriptions.add(realm.query<Settings>(), "settings")
+        subscriptions.add(realm.query<PaymentRecord>(), "payment_records")
+        subscriptions.add(realm.query<PaymentBalance>(), "payment_balances")
     }
 
     /**
@@ -203,7 +204,7 @@ class BerryHarvestApplication : Application() {
                     Log.w("Realm", "Transaction state error - recreating Realm instance")
 
                     // Attempt to close the problematic instance
-                    realmInstanceManager.closeCurrentThreadInstance()
+                    realmManager.closeInstance("default")
 
                     // Create fresh instance and retry
                     val freshRealm = getRealmInstance()
@@ -269,37 +270,13 @@ class BerryHarvestApplication : Application() {
         }
     }
 
-    private fun monitorSyncStatus() {
-        applicationScope.launch {
-            syncManager.syncStatus.collect { status ->
-                when (status) {
-                    is SyncStatus.InProgress -> {
-                        Log.d("SyncStatus", "Synchronization in progress")
-                        // Notify UI components if needed
-                    }
-                    is SyncStatus.Completed -> {
-                        Log.d("SyncStatus", "Synchronization completed successfully")
-                        // Refresh UI components
-                    }
-                    is SyncStatus.Failed -> {
-                        Log.e("SyncStatus", "Synchronization failed: ${status.reason}")
-                        // Show error notification if needed
-                    }
-                    is SyncStatus.Idle -> {
-                        // Nothing to do
-                    }
-                }
-            }
-        }
-    }
-
     private fun scheduleRealmInstanceCleanup() {
         applicationScope.launch {
             while (!isShuttingDown.get()) {
                 try {
                     // Perform cleanup every 5 minutes
                     delay(5 * 60 * 1000L)
-                    realmInstanceManager.performCleanup()
+                    realmManager.performCleanup()
                 } catch (e: Exception) {
                     Log.e("Realm", "Error during Realm instance cleanup", e)
                 }
@@ -317,7 +294,7 @@ class BerryHarvestApplication : Application() {
         applicationScope.cancel()
 
         // Close all Realm instances
-        realmInstanceManager.closeAllInstances()
+        realmManager.closeAllInstances()
 
         super.onTerminate()
     }
@@ -327,236 +304,7 @@ class BerryHarvestApplication : Application() {
         super.onLowMemory()
 
         applicationScope.launch {
-            realmInstanceManager.performCleanup(aggressive = true)
-        }
-    }
-
-    /**
-     * Inner class for managing Realm instances with proper thread safety and resource cleanup
-     */
-    private inner class RealmInstanceManager {
-        private val realmMutex = Mutex()
-        private val threadLocalRealm = ThreadLocal<Realm?>()
-        private val activeThreadIds = mutableSetOf<Long>()
-
-        /**
-         * Gets or creates a Realm instance for the current thread
-         */
-        suspend fun getRealmInstance(): Realm {
-            if (isShuttingDown.get()) {
-                throw IllegalStateException("Application is shutting down")
-            }
-
-            // First check thread-local cache
-            threadLocalRealm.get()?.let { realm ->
-                if (!realm.isClosed()) {
-                    return realm
-                }
-                // Clean up closed instance
-                threadLocalRealm.set(null)
-            }
-
-            // Create new instance with mutex to prevent race conditions
-            return realmMutex.withLock {
-                try {
-                    // Double-check if another thread created an instance
-                    threadLocalRealm.get()?.let { realm ->
-                        if (!realm.isClosed()) {
-                            return@withLock realm
-                        }
-                        threadLocalRealm.set(null)
-                    }
-
-                    Log.d("Realm", "Creating new Realm instance for thread ${Thread.currentThread().id}")
-
-                    // Create new instance
-                    val newRealm = withTimeout(15.seconds) {
-                        createRealmInstance()
-                    }
-
-                    // Save to thread-local storage
-                    threadLocalRealm.set(newRealm)
-
-                    // Track the thread ID for cleanup
-                    activeThreadIds.add(Thread.currentThread().id)
-
-                    newRealm
-                } catch (e: Exception) {
-                    Log.e("Realm", "Error creating Realm instance", e)
-                    val fallbackRealm = createFallbackRealmInstance()
-                    threadLocalRealm.set(fallbackRealm)
-                    fallbackRealm
-                }
-            }
-        }
-
-        /**
-         * Creates a new Realm instance based on the current network status.
-         */
-        private suspend fun createRealmInstance(): Realm {
-            Log.d("Realm", "Creating new Realm instance")
-            val app = this@BerryHarvestApplication.app ?: throw IllegalStateException("App is not initialized")
-
-            // If network is not available or in forced offline mode, create local-only Realm
-            if (forceOfflineMode || networkStatusManager.isNetworkAvailable() == false) {
-                Log.d("Realm", "Network unavailable, creating local Realm")
-                val config = RealmConfiguration.Builder(realmModels)
-                    .schemaVersion(1)
-                    .directory("local_realm")
-                    .build()
-
-                return Realm.open(config).also {
-                    Log.d("Realm", "Local Realm opened successfully")
-                }
-            }
-
-            // Try to login with anonymous credentials
-            Log.d("Realm", "Attempting anonymous login")
-            val user = try {
-                app.login(Credentials.anonymous())
-            } catch (e: Exception) {
-                Log.e("Realm", "Login failed: ${e.message}")
-                throw e
-            }
-            Log.d("Realm", "Login successful, configuring sync")
-
-            // Configure sync with reduced initial data download time
-            val config = SyncConfiguration.Builder(
-                user,
-                realmModels
-            )
-                .schemaVersion(1)
-                .initialSubscriptions { realm ->
-                    // Keep subscriptions minimal but with named subscriptions
-                    add(realm.query<Worker>(), "workers")
-                    add(realm.query<Gather>(), "gathers")
-                    add(realm.query<Assignment>(), "assignments")
-                    add(realm.query<Settings>(), "settings")
-                    add(realm.query<PaymentRecord>(), "payment_records")
-                    add(realm.query<PaymentBalance>(), "payment_balances")
-                }
-                .waitForInitialRemoteData(1.seconds) // Reduced from default to 1 second max
-                .build()
-
-            Log.d("Realm", "Opening synced Realm")
-
-            try {
-                return Realm.open(config).also {
-                    Log.d("Realm", "Synced Realm opened successfully")
-                }
-            } catch (e: Exception) {
-                Log.e("Realm", "Failed to open synced Realm: ${e.message}")
-                throw e
-            }
-        }
-
-        /**
-         * Creates a fallback local-only Realm instance for emergency use when
-         * normal initialization fails.
-         */
-        private fun createFallbackRealmInstance(): Realm {
-            Log.d("Realm", "Creating fallback local Realm")
-            try {
-                val config = RealmConfiguration.Builder(realmModels)
-                    .schemaVersion(1)
-                    .directory("local_fallback")
-                    .build()
-
-                return Realm.open(config).also {
-                    Log.d("Realm", "Fallback local Realm opened successfully")
-                }
-            } catch (e: Exception) {
-                Log.e("Realm", "Failed to create fallback Realm", e)
-
-                // Last resort - try in-memory Realm
-                val config = RealmConfiguration.Builder(realmModels)
-                    .schemaVersion(1)
-                    .inMemory()
-                    .build()
-
-                return Realm.open(config).also {
-                    Log.d("Realm", "In-memory Realm opened as final fallback")
-                }
-            }
-        }
-
-        /**
-         * Closes the Realm instance for the current thread
-         */
-        fun closeCurrentThreadInstance() {
-            val threadId = Thread.currentThread().id
-            val realm = threadLocalRealm.get()
-
-            try {
-                if (realm != null && !realm.isClosed()) {
-                    realm.close()
-                    Log.d("Realm", "Closed Realm instance for thread $threadId")
-                }
-            } catch (e: Exception) {
-                Log.e("Realm", "Error closing Realm instance for thread $threadId", e)
-            } finally {
-                threadLocalRealm.set(null)
-                activeThreadIds.remove(threadId)
-            }
-        }
-
-        /**
-         * Performs cleanup of unused or leaked Realm instances
-         */
-        suspend fun performCleanup(aggressive: Boolean = false) {
-            realmMutex.withLock {
-                var closedCount = 0
-                val currentThreadId = Thread.currentThread().id
-
-                // In aggressive mode, close all instances except the current thread's
-                if (aggressive) {
-                    for (threadId in activeThreadIds.toList()) {
-                        if (threadId != currentThreadId) {
-                            try {
-                                // We can't access other threads' thread-local storage directly,
-                                // so we just remove them from our tracking set
-                                activeThreadIds.remove(threadId)
-                                closedCount++
-                            } catch (e: Exception) {
-                                Log.e("Realm", "Error in aggressive cleanup for thread $threadId", e)
-                            }
-                        }
-                    }
-                } else {
-                    // Regular cleanup just checks for dead threads
-                    val deadThreads = activeThreadIds.filter {
-                        try {
-                            // This is a best-effort check - there's no reliable way
-                            // to check if a thread is alive from another thread
-                            // We'll just clean out our tracking set periodically
-                            Thread.getAllStackTraces().keys.none { t -> t.id == it }
-                        } catch (e: Exception) {
-                            // If we get an error, assume the thread is dead
-                            true
-                        }
-                    }
-
-                    // Remove dead threads from our tracking
-                    activeThreadIds.removeAll(deadThreads)
-                    closedCount = deadThreads.size
-                }
-
-                if (closedCount > 0) {
-                    Log.d("Realm", "Cleaned up tracking for $closedCount thread(s)")
-                }
-            }
-        }
-
-        /**
-         * Closes all Realm instances
-         */
-        fun closeAllInstances() {
-            // Close current thread's instance
-            closeCurrentThreadInstance()
-
-            // Clear tracking of all threads
-            activeThreadIds.clear()
-            Log.d("Realm", "Cleared all Realm instance tracking")
+            realmManager.performCleanup(aggressive = true)
         }
     }
 }

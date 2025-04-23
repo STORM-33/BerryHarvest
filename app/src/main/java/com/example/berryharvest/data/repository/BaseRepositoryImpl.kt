@@ -49,9 +49,11 @@ abstract class BaseRepositoryImpl<T : RealmObject>(
 
     protected val app: BerryHarvestApplication by lazy { application as BerryHarvestApplication }
 
-    private var _realm: Realm? = null
-    private val realmMutex = Mutex()
+    // Updated: Use repository-specific Realm context key
+    protected val realmContextKey = "repo_${entityType}"
+
     private val isInitialized = AtomicBoolean(false)
+    private val realmMutex = Mutex()
 
     // Pending operations tracking
     private val _pendingOperations = MutableStateFlow<List<PendingOperation>>(emptyList())
@@ -70,33 +72,22 @@ abstract class BaseRepositoryImpl<T : RealmObject>(
 
     /**
      * Safely gets a Realm instance, initializing it if necessary.
-     * Uses mutex to ensure thread safety when acquiring the instance.
+     * Uses the RealmManager to get a Realm instance with proper lifecycle management.
      *
      * @return A valid Realm instance
      * @throws IllegalStateException if Realm initialization fails
      */
     protected suspend fun getRealm(): Realm {
-        if (_realm != null && !_realm!!.isClosed()) {
-            return _realm!!
-        }
-
         return realmMutex.withLock {
             try {
-                // Double-check after acquiring the lock
-                if (_realm != null && !_realm!!.isClosed()) {
-                    return@withLock _realm!!
-                }
-
-                Log.d(logTag, "Getting new Realm instance")
-                val newRealm = app.getRealmInstance()
-                _realm = newRealm
+                val realm = app.getRealmInstance(realmContextKey)
 
                 if (!isInitialized.getAndSet(true)) {
                     // First-time initialization
-                    onRepositoryInitialized(newRealm)
+                    onRepositoryInitialized(realm)
                 }
 
-                newRealm
+                realm
             } catch (e: Exception) {
                 Log.e(logTag, "Error getting Realm instance", e)
                 _errorState.value = "Failed to initialize database: ${e.message}"
@@ -413,13 +404,10 @@ abstract class BaseRepositoryImpl<T : RealmObject>(
      * Closes the Realm instance if open.
      */
     override fun close() {
-        _realm?.let { realm ->
-            if (!realm.isClosed()) {
-                realm.close()
-                Log.d(logTag, "Closed Realm instance")
-            }
+        // Updated: Use RealmManager to close the instance
+        repositoryScope.launch {
+            app.realmManager.closeInstance(realmContextKey)
+            Log.d(logTag, "Repository closed")
         }
-        _realm = null
-        Log.d(logTag, "Repository closed")
     }
 }
