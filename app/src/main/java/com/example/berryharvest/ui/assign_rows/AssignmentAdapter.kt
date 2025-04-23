@@ -53,7 +53,10 @@ class AssignmentAdapter(
         val rowNumber = assignmentGroup.rowNumber
         val assignments = assignmentGroup.assignments
 
-        // Set row number text
+        Log.d("AssignmentAdapter", "Binding row $rowNumber with ${assignments.size} assignments")
+
+        // Set row number text with explicit visibility
+        holder.rowNumberTextView.visibility = View.VISIBLE
         holder.rowNumberTextView.text = "Ряд $rowNumber"
 
         // Set up inner RecyclerView with the worker adapter
@@ -62,6 +65,7 @@ class AssignmentAdapter(
             workerDetailsMap,
             onMoveWorkerClick
         )
+        holder.workerRecyclerView.visibility = View.VISIBLE
         holder.workerRecyclerView.layoutManager = LinearLayoutManager(holder.itemView.context)
         holder.workerRecyclerView.adapter = workerAdapter
 

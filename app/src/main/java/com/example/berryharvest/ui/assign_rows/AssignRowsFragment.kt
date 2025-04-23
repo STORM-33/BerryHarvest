@@ -125,6 +125,7 @@ class AssignRowsFragment : BaseFragment() {
 
         // Ensure loading state is reset if it gets stuck
         viewModel.ensureLoadingStateReset()
+        viewModel.forceRefreshUI()
     }
 
     private fun setupUI() {
@@ -137,16 +138,17 @@ class AssignRowsFragment : BaseFragment() {
         // Initialize adapter
         val adapter = createAssignmentAdapter()
 
-        // Setup recycler view
+        // Setup recycler view with explicit dimensions and visibility
+        assignmentsRecyclerView.visibility = View.VISIBLE
         assignmentsRecyclerView.adapter = adapter
         assignmentsRecyclerView.layoutManager = LinearLayoutManager(requireContext())
 
-        // Add dividers between items for better readability in compact layout
-        val dividerItemDecoration = DividerItemDecoration(
-            assignmentsRecyclerView.context,
-            (assignmentsRecyclerView.layoutManager as LinearLayoutManager).orientation
-        )
-        assignmentsRecyclerView.addItemDecoration(dividerItemDecoration)
+        // Add this to check RecyclerView after layout
+        assignmentsRecyclerView.post {
+            Log.d(TAG, "RecyclerView width: ${assignmentsRecyclerView.width}, " +
+                    "height: ${assignmentsRecyclerView.height}, " +
+                    "visibility: ${assignmentsRecyclerView.visibility == View.VISIBLE}")
+        }
 
         assignmentAdapter = adapter
     }

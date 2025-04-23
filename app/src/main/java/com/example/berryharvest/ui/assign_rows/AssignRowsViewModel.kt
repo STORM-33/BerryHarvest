@@ -79,8 +79,7 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
                             Log.e(TAG, "Error loading assignments", result.exception)
                             _error.value = "Помилка завантаження даних: ${result.message}"
 
-                            // Even if there's an error, try to load any local data we might have
-                            // This ensures we show something in offline mode
+                            // Add direct query fallback for offline mode
                             try {
                                 val realm = (getApplication() as BerryHarvestApplication).getRealmInstance()
                                 val localAssignments = realm.query<Assignment>().find()
@@ -94,7 +93,6 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
                                     .sortedBy { it.rowNumber }
 
                                 if (groupedAssignments.isNotEmpty()) {
-                                    Log.d(TAG, "Loaded ${groupedAssignments.size} assignment groups from local database")
                                     _assignments.value = groupedAssignments
                                     updateWorkerDetails(groupedAssignments)
                                 }
@@ -296,6 +294,19 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun forceRefreshUI() {
+        viewModelScope.launch {
+            val currentList = _assignments.value
+            // First set to empty list to force change
+            _assignments.value = emptyList()
+            // Small delay to ensure UI processes the change
+            delay(50)
+            // Then set back to original list
+            _assignments.value = currentList
+            Log.d(TAG, "Forced UI refresh with ${currentList.size} assignment groups")
+        }
+    }
+
     private fun refreshAssignmentsData() {
         viewModelScope.launch {
             Log.d(TAG, "Refreshing assignments data after sync")
@@ -494,4 +505,6 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
             _isLoading.value = false
         }
     }
+
+
 }

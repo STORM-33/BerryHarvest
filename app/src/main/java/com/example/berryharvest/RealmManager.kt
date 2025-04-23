@@ -51,9 +51,11 @@ class RealmManager(private val application: BerryHarvestApplication) {
         // Check if we already have a valid instance for this key
         instances[contextKey]?.let { realm ->
             if (!realm.isClosed()) {
+                Log.d(TAG, "Reusing existing Realm instance for context: $contextKey")
                 return realm
             }
             // Instance exists but is closed, remove it
+            Log.d(TAG, "Removing closed Realm instance for context: $contextKey")
             instances.remove(contextKey)
         }
 
@@ -69,7 +71,6 @@ class RealmManager(private val application: BerryHarvestApplication) {
 
             Log.d(TAG, "Creating new Realm instance for context: $contextKey")
 
-            // Create a new instance with timeout
             try {
                 val newRealm = withTimeout(DEFAULT_TIMEOUT) {
                     createRealmInstance()

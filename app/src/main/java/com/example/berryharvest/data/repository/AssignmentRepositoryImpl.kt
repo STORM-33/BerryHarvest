@@ -10,6 +10,7 @@ import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
 import io.realm.kotlin.query.RealmQuery
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import java.util.UUID
@@ -65,23 +66,41 @@ class AssignmentRepositoryImpl(
         emit(Result.Loading)
         try {
             val realm = getRealm()
+
+            // Use direct query instead of flow for more reliable results
+            val assignments = realm.query<Assignment>("isDeleted == false").find()
+
+            // Group assignments by row
+            val assignmentsByRow = assignments.groupBy { it.rowNumber }
+
+            // Convert to AssignmentGroup objects
+            val groups = assignmentsByRow.map { (rowNumber, assignments) ->
+                AssignmentGroup(rowNumber, assignments.toList())
+            }.sortedBy { it.rowNumber }
+
+            Log.d(logTag, "Created ${groups.size} assignment groups")
+            emit(Result.Success(groups))
+
+            // Now set up the flow for updates
             realm.query<Assignment>("isDeleted == false").asFlow()
                 .map { results ->
-                    // Group assignments by row
-                    val assignmentsByRow = results.list.groupBy { it.rowNumber }
+                    val updatedGroups = results.list
+                        .groupBy { it.rowNumber }
+                        .map { (rowNumber, assignments) ->
+                            AssignmentGroup(rowNumber, assignments.toList())
+                        }
+                        .sortedBy { it.rowNumber }
 
-                    // Convert to AssignmentGroup objects
-                    val groups = assignmentsByRow.map { (rowNumber, assignments) ->
-                        AssignmentGroup(rowNumber, assignments.toList())
-                    }.sortedBy { it.rowNumber }
-
-                    Log.d(logTag, "Created ${groups.size} assignment groups")
-                    Result.Success(groups)
+                    Result.Success(updatedGroups)
+                }
+                .catch { e ->
+                    Log.e(logTag, "Error in flow updates", e)
+                    emit(Result.Error(e))
                 }
                 .collect { emit(it) }
+
         } catch (e: Exception) {
             Log.e(logTag, "Error in getAllGroupedByRow", e)
-            setError("Failed to load assignment groups: ${e.message}")
             emit(Result.Error(e))
         }
     }
