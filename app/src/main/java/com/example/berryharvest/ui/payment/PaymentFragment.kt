@@ -31,17 +31,17 @@ class PaymentFragment : BaseFragment() {
 
     // UI components
     private lateinit var workerSearchView: SearchableSpinnerView
-    private lateinit var workerInfoCard: View
+    private lateinit var workerSummaryCard: View
     private lateinit var workerNameTextView: TextView
+    private lateinit var totalEarningsTextView: TextView
+    private lateinit var totalPaymentsTextView: TextView
     private lateinit var balanceTextView: TextView
     private lateinit var todayPunnetsTextView: TextView
     private lateinit var fullPaymentButton: Button
     private lateinit var partialPaymentButton: Button
-    private lateinit var paymentHistoryTitle: TextView
     private lateinit var paymentHistoryRecyclerView: RecyclerView
     private lateinit var loadingProgressBar: ProgressBar
     private lateinit var emptyStateTextView: TextView
-    private lateinit var earningsTextView: TextView
 
     private lateinit var paymentAdapter: PaymentAdapter
 
@@ -57,17 +57,17 @@ class PaymentFragment : BaseFragment() {
 
         // Find views
         workerSearchView = root.findViewById(R.id.workerSearchView)
-        workerInfoCard = root.findViewById(R.id.workerInfoCard)
+        workerSummaryCard = root.findViewById(R.id.workerSummaryCard)
         workerNameTextView = root.findViewById(R.id.workerNameTextView)
+        totalEarningsTextView = root.findViewById(R.id.totalEarningsTextView)
+        totalPaymentsTextView = root.findViewById(R.id.totalPaymentsTextView)
         balanceTextView = root.findViewById(R.id.balanceTextView)
         todayPunnetsTextView = root.findViewById(R.id.todayPunnetsTextView)
         fullPaymentButton = root.findViewById(R.id.fullPaymentButton)
         partialPaymentButton = root.findViewById(R.id.partialPaymentButton)
-        paymentHistoryTitle = root.findViewById(R.id.paymentHistoryTitle)
         paymentHistoryRecyclerView = root.findViewById(R.id.paymentHistoryRecyclerView)
         loadingProgressBar = root.findViewById(R.id.loadingProgressBar)
         emptyStateTextView = root.findViewById(R.id.emptyStateTextView)
-        earningsTextView = root.findViewById(R.id.earningsTextView)
 
         // Set up RecyclerView
         paymentAdapter = PaymentAdapter()
@@ -102,10 +102,12 @@ class PaymentFragment : BaseFragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             // Observe all workers for search
             viewModel.allWorkers.collect { workers ->
-                workerSearchView.setAdapter(workers.map { it.toSearchableItem() })
-                workerSearchView.setOnItemSelectedListener { searchableItem ->
-                    val workerItem = searchableItem as WorkerSearchableItem
-                    viewModel.selectWorker(workerItem.worker)
+                if (workers.isNotEmpty()) {
+                    workerSearchView.setAdapter(workers.map { it.toSearchableItem() })
+                    workerSearchView.setOnItemSelectedListener { searchableItem ->
+                        val workerItem = searchableItem as WorkerSearchableItem
+                        viewModel.selectWorker(workerItem.worker)
+                    }
                 }
             }
         }
@@ -126,12 +128,19 @@ class PaymentFragment : BaseFragment() {
         launchWhenStarted("worker") {
             viewModel.selectedWorker.collect { worker ->
                 worker?.let {
-                    showWorkerInfo(it)
+                    showWorkerSummary(it)
                     // Delay slightly to allow all data to load
                     delay(500)
                     // Check for balance discrepancies
                     viewModel.checkBalanceDiscrepancy()
-                } ?: hideWorkerInfo()
+                } ?: hideWorkerSummary()
+            }
+        }
+
+        // Observe earnings
+        launchWhenStarted("earnings") {
+            viewModel.workerEarnings.collect { earnings ->
+                updateEarningsDisplay(earnings)
             }
         }
 
@@ -143,7 +152,7 @@ class PaymentFragment : BaseFragment() {
         }
 
         // Observe today's punnet count
-        launchWhenStarted("punnet-cost") {
+        launchWhenStarted("punnet-count") {
             viewModel.todayPunnetCount.collect { count ->
                 todayPunnetsTextView.text = count.toString()
             }
@@ -153,14 +162,7 @@ class PaymentFragment : BaseFragment() {
         launchWhenStarted("payment-history") {
             viewModel.paymentHistory.collect { payments ->
                 paymentAdapter.submitList(payments)
-
-                if (payments.isEmpty()) {
-                    emptyStateTextView.visibility = View.VISIBLE
-                    paymentHistoryRecyclerView.visibility = View.GONE
-                } else {
-                    emptyStateTextView.visibility = View.GONE
-                    paymentHistoryRecyclerView.visibility = View.VISIBLE
-                }
+                updatePaymentHistoryDisplay(payments)
             }
         }
 
@@ -190,39 +192,46 @@ class PaymentFragment : BaseFragment() {
                 }
             }
         }
-
-        launchWhenStarted("earnings") {
-            viewModel.workerEarnings.collect { earnings ->
-                updateEarningsDisplay(earnings)
-            }
-        }
     }
 
     private fun updateEarningsDisplay(earnings: Float) {
-        earningsTextView.text = String.format(Locale.getDefault(), "%.2f₴", earnings)
-    }
-
-    private fun showWorkerInfo(worker: Worker) {
-        workerNameTextView.text = "[${worker.sequenceNumber}] ${worker.fullName}"
-        workerInfoCard.visibility = View.VISIBLE
-        paymentHistoryTitle.visibility = View.VISIBLE
-        paymentHistoryRecyclerView.visibility = View.VISIBLE
-    }
-
-    private fun hideWorkerInfo() {
-        workerInfoCard.visibility = View.GONE
-        paymentHistoryTitle.visibility = View.GONE
-        paymentHistoryRecyclerView.visibility = View.GONE
-        emptyStateTextView.visibility = View.GONE
+        totalEarningsTextView.text = String.format(Locale.getDefault(), "%.2f₴", earnings)
     }
 
     private fun updateBalanceDisplay(balance: Float) {
         balanceTextView.text = String.format(Locale.getDefault(), "%.2f₴", balance)
 
+        // Set color based on balance
+        val color = when {
+            balance > 0 -> requireContext().getColor(android.R.color.holo_green_dark)
+            balance < 0 -> requireContext().getColor(android.R.color.holo_red_dark)
+            else -> requireContext().getColor(android.R.color.black)
+        }
+        balanceTextView.setTextColor(color)
+
         // Enable/disable payment buttons based on balance
         val hasPositiveBalance = balance > 0
         fullPaymentButton.isEnabled = hasPositiveBalance
         partialPaymentButton.isEnabled = hasPositiveBalance
+    }
+
+    private fun updatePaymentHistoryDisplay(payments: List<com.example.berryharvest.data.model.PaymentRecord>) {
+        // Calculate total payments for display
+        val totalPayments = payments.sumOf { it.amount.toDouble() }.toFloat()
+        totalPaymentsTextView.text = String.format(Locale.getDefault(), "%.2f₴", totalPayments)
+    }
+
+    private fun showWorkerSummary(worker: Worker) {
+        workerNameTextView.text = "[${worker.sequenceNumber}] ${worker.fullName}"
+        workerSummaryCard.visibility = View.VISIBLE
+        paymentHistoryRecyclerView.visibility = View.VISIBLE
+        emptyStateTextView.visibility = View.GONE
+    }
+
+    private fun hideWorkerSummary() {
+        workerSummaryCard.visibility = View.GONE
+        paymentHistoryRecyclerView.visibility = View.GONE
+        emptyStateTextView.visibility = View.VISIBLE
     }
 
     private fun showFullPaymentDialog() {

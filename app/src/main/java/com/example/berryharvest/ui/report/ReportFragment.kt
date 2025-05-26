@@ -35,13 +35,13 @@ class ReportFragment : BaseFragment() {
     private lateinit var todayEarningsTextView: TextView
     private lateinit var avgPunnetsPerWorkerTextView: TextView
 
-    // Top workers list
-    private lateinit var topWorkersRecyclerView: RecyclerView
-    private lateinit var topWorkersAdapter: TopWorkersAdapter
-
     // Daily production list
     private lateinit var dailyProductionRecyclerView: RecyclerView
     private lateinit var dailyProductionAdapter: DailyProductionAdapter
+
+    // Worker stats
+    private lateinit var workerStatsRecyclerView: RecyclerView
+    private lateinit var workerStatsAdapter: WorkerStatsAdapter
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -54,6 +54,7 @@ class ReportFragment : BaseFragment() {
         // Initialize UI components
         swipeRefreshLayout = root.findViewById(R.id.swipeRefreshLayout)
         loadingProgressBar = root.findViewById(R.id.loadingProgressBar)
+
         // Initialize summary views
         totalPunnetsTextView = root.findViewById(R.id.totalPunnetsTextView)
         totalEarningsTextView = root.findViewById(R.id.totalEarningsTextView)
@@ -62,17 +63,17 @@ class ReportFragment : BaseFragment() {
         todayEarningsTextView = root.findViewById(R.id.todayEarningsTextView)
         avgPunnetsPerWorkerTextView = root.findViewById(R.id.avgPunnetsPerWorkerTextView)
 
-        // Initialize top workers recycler view
-        topWorkersRecyclerView = root.findViewById(R.id.topWorkersRecyclerView)
-        topWorkersAdapter = TopWorkersAdapter()
-        topWorkersRecyclerView.adapter = topWorkersAdapter
-        topWorkersRecyclerView.layoutManager = LinearLayoutManager(requireContext())
-
         // Initialize daily production recycler view
         dailyProductionRecyclerView = root.findViewById(R.id.dailyProductionRecyclerView)
         dailyProductionAdapter = DailyProductionAdapter()
         dailyProductionRecyclerView.adapter = dailyProductionAdapter
         dailyProductionRecyclerView.layoutManager = LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
+
+        // Initialize worker stats recycler view
+        workerStatsRecyclerView = root.findViewById(R.id.workerStatsRecyclerView)
+        workerStatsAdapter = WorkerStatsAdapter()
+        workerStatsRecyclerView.adapter = workerStatsAdapter
+        workerStatsRecyclerView.layoutManager = LinearLayoutManager(requireContext())
 
         setupUI()
         setupObservers()
@@ -115,10 +116,10 @@ class ReportFragment : BaseFragment() {
             }
         }
 
-        // Observe top workers
-        launchWhenStarted("top-workers") {
+        // Observe worker stats
+        launchWhenStarted("worker-stats") {
             viewModel.topWorkers.collect { workers ->
-                updateTopWorkers(workers)
+                updateWorkerStats(workers)
             }
         }
 
@@ -145,8 +146,8 @@ class ReportFragment : BaseFragment() {
         avgPunnetsPerWorkerTextView.text = String.format(Locale.getDefault(), "%.1f", stats.avgPunnetsPerWorker)
     }
 
-    private fun updateTopWorkers(workers: List<WorkerStats>) {
-        topWorkersAdapter.submitList(workers)
+    private fun updateWorkerStats(workers: List<WorkerStats>) {
+        workerStatsAdapter.submitList(workers)
     }
 
     private fun updateDailyProduction(production: List<DailyProduction>) {
@@ -158,10 +159,9 @@ class ReportFragment : BaseFragment() {
     }
 }
 
-// Adapters for RecyclerViews
-
-class TopWorkersAdapter :
-    androidx.recyclerview.widget.ListAdapter<WorkerStats, TopWorkersAdapter.ViewHolder>(
+// Worker stats adapter - simplified version without "top workers" concept
+class WorkerStatsAdapter :
+    androidx.recyclerview.widget.ListAdapter<WorkerStats, WorkerStatsAdapter.ViewHolder>(
         object : androidx.recyclerview.widget.DiffUtil.ItemCallback<WorkerStats>() {
             override fun areItemsTheSame(oldItem: WorkerStats, newItem: WorkerStats): Boolean {
                 return oldItem.workerId == newItem.workerId
@@ -177,16 +177,18 @@ class TopWorkersAdapter :
         val nameTextView: TextView = view.findViewById(R.id.workerNameTextView)
         val punnetsTextView: TextView = view.findViewById(R.id.workerPunnetsTextView)
         val earningsTextView: TextView = view.findViewById(R.id.workerEarningsTextView)
+        val rankTextView: TextView = view.findViewById(R.id.rankTextView)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_top_worker, parent, false)
+            .inflate(R.layout.item_worker_stats, parent, false)
         return ViewHolder(view)
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = getItem(position)
+        holder.rankTextView.text = "#${position + 1}"
         holder.nameTextView.text = "${item.workerName} [${item.sequenceNumber}]"
         holder.punnetsTextView.text = "${item.totalPunnets}"
         holder.earningsTextView.text = String.format(Locale.getDefault(), "%.2f₴", item.totalEarnings)

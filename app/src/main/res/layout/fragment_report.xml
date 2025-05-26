@@ -18,22 +18,11 @@
             android:orientation="vertical"
             android:padding="16dp">
 
-            <!-- Title -->
-            <TextView
-                android:id="@+id/titleTextView"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="Зведена статистика"
-                android:textAppearance="@style/TextAppearance.AppCompat.Large"
-                android:textSize="20sp"
-                android:textStyle="bold" />
-
-            <!-- Summary section -->
+            <!-- Overall Statistics Card -->
             <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
+                android:layout_marginBottom="16dp"
                 app:cardCornerRadius="8dp"
                 app:cardElevation="4dp">
 
@@ -46,15 +35,16 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Загальна статистика"
+                        android:text="📊 Загальна статистика"
                         android:textAppearance="@style/TextAppearance.AppCompat.Medium"
-                        android:textStyle="bold" />
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="16dp" />
 
-                    <!-- Total stats row 1 -->
+                    <!-- Overall stats grid -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
                         android:orientation="horizontal">
 
                         <!-- Total punnets -->
@@ -62,21 +52,25 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:orientation="vertical"
+                            android:gravity="center">
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Всього пінеток"
-                                android:textSize="12sp" />
+                                android:textSize="12sp"
+                                android:textColor="#666666" />
 
                             <TextView
                                 android:id="@+id/totalPunnetsTextView"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="0"
-                                android:textAppearance="@style/TextAppearance.AppCompat.Medium"
-                                android:textStyle="bold" />
+                                android:textAppearance="@style/TextAppearance.AppCompat.Large"
+                                android:textStyle="bold"
+                                android:textColor="#4CAF50"
+                                android:layout_marginTop="4dp" />
                         </LinearLayout>
 
                         <!-- Total earnings -->
@@ -84,21 +78,25 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:orientation="vertical"
+                            android:gravity="center">
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Всього зароблено"
-                                android:textSize="12sp" />
+                                android:textSize="12sp"
+                                android:textColor="#666666" />
 
                             <TextView
                                 android:id="@+id/totalEarningsTextView"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="0.00₴"
-                                android:textAppearance="@style/TextAppearance.AppCompat.Medium"
-                                android:textStyle="bold" />
+                                android:textAppearance="@style/TextAppearance.AppCompat.Large"
+                                android:textStyle="bold"
+                                android:textColor="#FF9800"
+                                android:layout_marginTop="4dp" />
                         </LinearLayout>
 
                         <!-- Worker count -->
@@ -106,29 +104,57 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:orientation="vertical"
+                            android:gravity="center">
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Кількість працівників"
-                                android:textSize="12sp" />
+                                android:text="Працівників"
+                                android:textSize="12sp"
+                                android:textColor="#666666" />
 
                             <TextView
                                 android:id="@+id/workerCountTextView"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="0"
-                                android:textAppearance="@style/TextAppearance.AppCompat.Medium"
-                                android:textStyle="bold" />
+                                android:textAppearance="@style/TextAppearance.AppCompat.Large"
+                                android:textStyle="bold"
+                                android:textColor="#2196F3"
+                                android:layout_marginTop="4dp" />
                         </LinearLayout>
                     </LinearLayout>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
 
-                    <!-- Total stats row 2 -->
+            <!-- Today's Statistics Card -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="📅 Сьогоднішня статистика"
+                        android:textAppearance="@style/TextAppearance.AppCompat.Medium"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="16dp" />
+
+                    <!-- Today's stats grid -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
                         android:orientation="horizontal">
 
                         <!-- Today punnets -->
@@ -136,21 +162,25 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:orientation="vertical"
+                            android:gravity="center">
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Сьогодні пінеток"
-                                android:textSize="12sp" />
+                                android:text="Пінеток сьогодні"
+                                android:textSize="12sp"
+                                android:textColor="#666666" />
 
                             <TextView
                                 android:id="@+id/todayPunnetsTextView"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="0"
-                                android:textAppearance="@style/TextAppearance.AppCompat.Medium"
-                                android:textStyle="bold" />
+                                android:textAppearance="@style/TextAppearance.AppCompat.Large"
+                                android:textStyle="bold"
+                                android:textColor="#4CAF50"
+                                android:layout_marginTop="4dp" />
                         </LinearLayout>
 
                         <!-- Today earnings -->
@@ -158,21 +188,25 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:orientation="vertical"
+                            android:gravity="center">
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="Сьогодні зароблено"
-                                android:textSize="12sp" />
+                                android:textSize="12sp"
+                                android:textColor="#666666" />
 
                             <TextView
                                 android:id="@+id/todayEarningsTextView"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="0.00₴"
-                                android:textAppearance="@style/TextAppearance.AppCompat.Medium"
-                                android:textStyle="bold" />
+                                android:textAppearance="@style/TextAppearance.AppCompat.Large"
+                                android:textStyle="bold"
+                                android:textColor="#FF9800"
+                                android:layout_marginTop="4dp" />
                         </LinearLayout>
 
                         <!-- Avg punnets per worker -->
@@ -180,67 +214,158 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:orientation="vertical"
+                            android:gravity="center">
 
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Середня кількість"
-                                android:textSize="12sp" />
+                                android:text="Середня к-ть"
+                                android:textSize="12sp"
+                                android:textColor="#666666" />
 
                             <TextView
                                 android:id="@+id/avgPunnetsPerWorkerTextView"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="0"
-                                android:textAppearance="@style/TextAppearance.AppCompat.Medium"
-                                android:textStyle="bold" />
+                                android:textAppearance="@style/TextAppearance.AppCompat.Large"
+                                android:textStyle="bold"
+                                android:textColor="#9C27B0"
+                                android:layout_marginTop="4dp" />
                         </LinearLayout>
                     </LinearLayout>
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
             <!-- Daily Production Section -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
-                android:text="Збір за останні 7 днів"
-                android:textAppearance="@style/TextAppearance.AppCompat.Medium"
-                android:textStyle="bold" />
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/dailyProductionRecyclerView"
+            <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:clipToPadding="false"
-                android:orientation="horizontal"
-                android:paddingStart="4dp"
-                android:paddingEnd="4dp"
-                app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
-                tools:itemCount="7"
-                tools:listitem="@layout/item_daily_production" />
+                android:layout_marginBottom="16dp"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="4dp">
 
-            <!-- Top Workers Section -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="24dp"
-                android:text="Найкращі працівники"
-                android:textAppearance="@style/TextAppearance.AppCompat.Medium"
-                android:textStyle="bold" />
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
 
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/topWorkersRecyclerView"
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="📈 Збір за останні 7 днів"
+                        android:textAppearance="@style/TextAppearance.AppCompat.Medium"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="12dp" />
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/dailyProductionRecyclerView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:clipToPadding="false"
+                        android:orientation="horizontal"
+                        android:paddingStart="4dp"
+                        android:paddingEnd="4dp"
+                        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+                        tools:itemCount="7"
+                        tools:listitem="@layout/item_daily_production" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Worker Performance Section -->
+            <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:clipToPadding="false"
-                android:nestedScrollingEnabled="false"
-                app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
-                tools:itemCount="5"
-                tools:listitem="@layout/item_top_worker" />
+                app:cardCornerRadius="8dp"
+                app:cardElevation="4dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="12dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="👥 Продуктивність працівників"
+                            android:textAppearance="@style/TextAppearance.AppCompat.Medium"
+                            android:textSize="18sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="(сортування за заробітком)"
+                            android:textSize="12sp"
+                            android:textColor="#666666"
+                            android:layout_gravity="bottom" />
+                    </LinearLayout>
+
+                    <!-- Header row -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:padding="8dp"
+                        android:background="#F5F5F5"
+                        android:layout_marginBottom="8dp">
+
+                        <TextView
+                            android:layout_width="40dp"
+                            android:layout_height="wrap_content"
+                            android:text="№"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:gravity="center" />
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="2"
+                            android:text="Працівник"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Пінеток"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:gravity="center" />
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Заробіток"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:gravity="end" />
+                    </LinearLayout>
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/workerStatsRecyclerView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:nestedScrollingEnabled="false"
+                        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+                        tools:itemCount="5"
+                        tools:listitem="@layout/item_worker_stats" />
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
 
             <!-- Loading indicator -->
             <ProgressBar
