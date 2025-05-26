@@ -316,13 +316,12 @@ class AddWorkerFragment : BaseFragment() {
     }
 
     private fun showWorkerOptionsDialog(worker: Worker) {
-        val options = arrayOf("Змінити", "Видалити")
+        val options = arrayOf("Змінити")
         AlertDialog.Builder(requireContext())
             .setTitle("Дії")
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> showEditWorkerDialog(worker)
-                    1 -> showDeleteWorkerConfirmation(worker)
                 }
             }
             .show()

@@ -39,6 +39,10 @@ class RealmManager(private val application: BerryHarvestApplication) {
     // Increased timeout for initial sync
     private val INITIAL_SYNC_TIMEOUT = 10.seconds
 
+    // Track if manager is closed to prevent operations after shutdown
+    @Volatile
+    private var isClosed = false
+
     /**
      * Gets a Realm instance for the specified context key.
      * If an instance for this key already exists and is valid, returns it.
@@ -46,15 +50,20 @@ class RealmManager(private val application: BerryHarvestApplication) {
      *
      * @param contextKey A key to identify the context in which the Realm is used
      * @return A valid Realm instance
+     * @throws IllegalStateException if the manager has been closed
      */
     suspend fun getInstance(contextKey: String = "default"): Realm {
+        if (isClosed) {
+            throw IllegalStateException("RealmManager has been closed")
+        }
+
         // Check if we already have a valid instance for this key
         instances[contextKey]?.let { realm ->
             if (!realm.isClosed()) {
                 Log.d(TAG, "Reusing existing Realm instance for context: $contextKey")
                 return realm
             }
-            // Instance exists but is closed, remove it
+            // Instance exists but is closed, remove it safely
             Log.d(TAG, "Removing closed Realm instance for context: $contextKey")
             instances.remove(contextKey)
         }
@@ -96,7 +105,7 @@ class RealmManager(private val application: BerryHarvestApplication) {
         val app = application.app ?: throw IllegalStateException("App is not initialized")
 
         // If network is not available or in forced offline mode, create local-only Realm
-        if (application.forceOfflineMode || application.networkStatusManager.isNetworkAvailable() == false) {
+        if (application.forceOfflineMode || !application.networkStatusManager.isNetworkAvailable()) {
             Log.d(TAG, "Network unavailable, creating local Realm")
             val config = RealmConfiguration.Builder(application.realmModels)
                 .schemaVersion(1)
@@ -133,8 +142,6 @@ class RealmManager(private val application: BerryHarvestApplication) {
             .waitForInitialRemoteData(INITIAL_SYNC_TIMEOUT)
             .build()
 
-
-
         Log.d(TAG, "Opening synced Realm")
 
         try {
@@ -166,13 +173,18 @@ class RealmManager(private val application: BerryHarvestApplication) {
             Log.e(TAG, "Failed to create fallback Realm", e)
 
             // Last resort - try in-memory Realm
-            val config = RealmConfiguration.Builder(application.realmModels)
-                .schemaVersion(1)
-                .inMemory()
-                .build()
+            try {
+                val config = RealmConfiguration.Builder(application.realmModels)
+                    .schemaVersion(1)
+                    .inMemory()
+                    .build()
 
-            return Realm.open(config).also {
-                Log.d(TAG, "In-memory Realm opened as final fallback")
+                return Realm.open(config).also {
+                    Log.d(TAG, "In-memory Realm opened as final fallback")
+                }
+            } catch (e2: Exception) {
+                Log.e(TAG, "Failed to create in-memory Realm", e2)
+                throw IllegalStateException("Unable to create any Realm instance", e2)
             }
         }
     }
@@ -182,6 +194,13 @@ class RealmManager(private val application: BerryHarvestApplication) {
      */
     fun closeInstance(contextKey: String) {
         val realm = instances.remove(contextKey)
+        closeRealmSafely(realm, contextKey)
+    }
+
+    /**
+     * Safely closes a Realm instance with proper error handling.
+     */
+    private fun closeRealmSafely(realm: Realm?, contextKey: String) {
         try {
             if (realm != null && !realm.isClosed()) {
                 realm.close()
@@ -196,10 +215,17 @@ class RealmManager(private val application: BerryHarvestApplication) {
      * Closes all Realm instances.
      */
     fun closeAllInstances() {
-        instances.keys.toList().forEach { key ->
-            closeInstance(key)
-        }
+        isClosed = true
+
+        // Get all current instances to avoid concurrent modification
+        val currentInstances = instances.toMap()
         instances.clear()
+
+        // Close all instances
+        currentInstances.forEach { (key, realm) ->
+            closeRealmSafely(realm, key)
+        }
+
         Log.d(TAG, "Closed all Realm instances")
     }
 
@@ -207,6 +233,8 @@ class RealmManager(private val application: BerryHarvestApplication) {
      * Performs cleanup of potentially leaked Realm instances.
      */
     suspend fun performCleanup(aggressive: Boolean = false) {
+        if (isClosed) return
+
         mutex.withLock {
             var closedCount = 0
 
@@ -215,15 +243,18 @@ class RealmManager(private val application: BerryHarvestApplication) {
 
             for (key in keys) {
                 val realm = instances[key]
-                if (realm == null || realm.isClosed() || aggressive) {
-                    instances.remove(key)
-                    realm?.let {
-                        try {
-                            if (!it.isClosed()) it.close() else TODO()
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error closing Realm during cleanup", e)
+                try {
+                    if (realm == null || realm.isClosed() || aggressive) {
+                        instances.remove(key)
+                        if (realm != null && !realm.isClosed()) {
+                            realm.close()
                         }
+                        closedCount++
                     }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error closing Realm during cleanup for key: $key", e)
+                    // Remove from map even if close failed to prevent accumulation
+                    instances.remove(key)
                     closedCount++
                 }
             }
@@ -233,4 +264,14 @@ class RealmManager(private val application: BerryHarvestApplication) {
             }
         }
     }
+
+    /**
+     * Returns the number of active Realm instances.
+     */
+    fun getActiveInstanceCount(): Int = instances.size
+
+    /**
+     * Checks if the manager has been closed.
+     */
+    fun isClosed(): Boolean = isClosed
 }

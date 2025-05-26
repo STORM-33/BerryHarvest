@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Main application class responsible for initializing global dependencies
  * and managing Realm database lifecycle.
+ * Enhanced version with proper resource management and shutdown handling.
  */
 class BerryHarvestApplication : Application() {
 
@@ -60,8 +61,9 @@ class BerryHarvestApplication : Application() {
     // Application-scoped coroutine scope for background operations
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + createCoroutineErrorHandler())
 
-    // Flag to track if application is shutting down
+    // Flags to track application state
     private val isShuttingDown = AtomicBoolean(false)
+    private val isInitialized = AtomicBoolean(false)
 
     // Models included in the Realm schema
     val realmModels = setOf(
@@ -73,29 +75,62 @@ class BerryHarvestApplication : Application() {
         PaymentBalance::class
     )
 
-    // Updated: Replace RealmInstanceManager with RealmManager
+    // RealmManager instance
     val realmManager = RealmManager(this)
 
     /**
      * Creates an error handler for coroutines to prevent crashes from uncaught exceptions
      */
     private fun createCoroutineErrorHandler() = CoroutineExceptionHandler { _, throwable ->
-        Log.e("BerryHarvestApp", "Uncaught exception in coroutine", throwable)
-        // Here you could integrate with a crash reporting service
+        if (throwable !is CancellationException) {
+            Log.e("BerryHarvestApp", "Uncaught exception in coroutine", throwable)
+            // Here you could integrate with a crash reporting service
+        }
     }
 
     override fun onCreate() {
         super.onCreate()
+
+        try {
+            initializeApplication()
+        } catch (e: Exception) {
+            Log.e("BerryHarvestApp", "Error during application initialization", e)
+            // Don't crash the app, but log the error
+        }
+    }
+
+    private fun initializeApplication() {
+        if (isInitialized.getAndSet(true)) {
+            Log.w("BerryHarvestApp", "Application already initialized")
+            return
+        }
+
+        Log.d("BerryHarvestApp", "Initializing BerryHarvest Application")
+
+        // Initialize MongoDB Realm App
         val appID = "application-1-rgotpim"
         app = App.create(AppConfiguration.Builder(appID).build())
 
         // Initialize sync manager after repositories
         syncManager = SyncManager(this, ProcessLifecycleOwner.get().lifecycleScope)
-        syncManager.startSyncMonitoring()
+
+        // Start sync monitoring
+        applicationScope.launch {
+            try {
+                // Add small delay to ensure all components are ready
+                delay(1000)
+                if (!isShuttingDown.get()) {
+                    syncManager.startSyncMonitoring()
+                }
+            } catch (e: Exception) {
+                Log.e("BerryHarvestApp", "Error starting sync monitoring", e)
+            }
+        }
 
         // Schedule periodic cleanup of unused Realm instances
         scheduleRealmInstanceCleanup()
 
+        Log.d("BerryHarvestApp", "Application initialization completed")
     }
 
     /**
@@ -104,9 +139,19 @@ class BerryHarvestApplication : Application() {
      *
      * @param contextKey An optional key to identify the context of the Realm use
      * @return A valid Realm instance
+     * @throws IllegalStateException if application is shutting down
      */
     suspend fun getRealmInstance(contextKey: String = "default"): Realm {
-        return realmManager.getInstance(contextKey)
+        if (isShuttingDown.get()) {
+            throw IllegalStateException("Application is shutting down")
+        }
+
+        return try {
+            realmManager.getInstance(contextKey)
+        } catch (e: Exception) {
+            Log.e("BerryHarvestApp", "Error getting Realm instance", e)
+            throw e
+        }
     }
 
     /**
@@ -126,6 +171,8 @@ class BerryHarvestApplication : Application() {
      * Ensures all required subscriptions are set up for the synced Realm.
      */
     suspend fun ensureSubscriptions() {
+        if (isShuttingDown.get()) return
+
         try {
             val realm = getRealmInstance()
 
@@ -193,6 +240,10 @@ class BerryHarvestApplication : Application() {
      * @return The result of the transaction
      */
     suspend fun <T> safeWriteTransaction(block: MutableRealm.() -> T): T {
+        if (isShuttingDown.get()) {
+            throw IllegalStateException("Application is shutting down")
+        }
+
         return withContext(Dispatchers.IO) {
             val realm = getRealmInstance()
             try {
@@ -231,35 +282,45 @@ class BerryHarvestApplication : Application() {
     suspend fun <T> safeWriteTransactionWithRetry(
         maxRetries: Int = 3,
         block: MutableRealm.() -> T
-    ): T = withContext(Dispatchers.IO) {
-        var attempts = 0
-        var lastException: Exception? = null
-
-        while (attempts < maxRetries) {
-            try {
-                return@withContext safeWriteTransaction(block)
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e // Don't catch cancellation exceptions
-
-                lastException = e
-                Log.w("Realm", "Transaction failed (attempt ${attempts + 1}/$maxRetries): ${e.message}")
-                attempts++
-
-                if (attempts < maxRetries) {
-                    // Exponential backoff
-                    val delayMs = (100L * (1 shl attempts))
-                    delay(delayMs)
-                }
-            }
+    ): T {
+        if (isShuttingDown.get()) {
+            throw IllegalStateException("Application is shutting down")
         }
 
-        throw lastException ?: IllegalStateException("Transaction failed after $maxRetries attempts")
+        return withContext(Dispatchers.IO) {
+            var attempts = 0
+            var lastException: Exception? = null
+
+            while (attempts < maxRetries && !isShuttingDown.get()) {
+                try {
+                    return@withContext safeWriteTransaction(block)
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e // Don't catch cancellation exceptions
+
+                    lastException = e
+                    Log.w("Realm", "Transaction failed (attempt ${attempts + 1}/$maxRetries): ${e.message}")
+                    attempts++
+
+                    if (attempts < maxRetries && !isShuttingDown.get()) {
+                        // Exponential backoff
+                        val delayMs = (100L * (1 shl attempts))
+                        delay(delayMs)
+                    }
+                }
+            }
+
+            throw lastException ?: IllegalStateException("Transaction failed after $maxRetries attempts")
+        }
     }
 
     /**
      * Executes a database operation on the IO dispatcher with proper error handling.
      */
     suspend fun <T> withDatabaseContext(block: suspend (Realm) -> T): T {
+        if (isShuttingDown.get()) {
+            throw IllegalStateException("Application is shutting down")
+        }
+
         return withContext(Dispatchers.IO) {
             val realm = getRealmInstance()
             try {
@@ -277,7 +338,12 @@ class BerryHarvestApplication : Application() {
                 try {
                     // Perform cleanup every 5 minutes
                     delay(5 * 60 * 1000L)
-                    realmManager.performCleanup()
+                    if (!isShuttingDown.get()) {
+                        realmManager.performCleanup()
+                    }
+                } catch (e: CancellationException) {
+                    Log.d("BerryHarvestApp", "Cleanup task cancelled")
+                    break
                 } catch (e: Exception) {
                     Log.e("Realm", "Error during Realm instance cleanup", e)
                 }
@@ -287,16 +353,7 @@ class BerryHarvestApplication : Application() {
 
     // Close Realm and repositories when application terminates
     override fun onTerminate() {
-        isShuttingDown.set(true)
-        repositoryProvider.closeAll()
-        syncManager.stopPeriodicSyncJob()
-
-        // Cancel all background jobs
-        applicationScope.cancel()
-
-        // Close all Realm instances
-        realmManager.closeAllInstances()
-
+        shutdown()
         super.onTerminate()
     }
 
@@ -304,8 +361,56 @@ class BerryHarvestApplication : Application() {
     override fun onLowMemory() {
         super.onLowMemory()
 
-        applicationScope.launch {
-            realmManager.performCleanup(aggressive = true)
+        if (!isShuttingDown.get()) {
+            applicationScope.launch {
+                try {
+                    realmManager.performCleanup(aggressive = true)
+                } catch (e: Exception) {
+                    Log.e("BerryHarvestApp", "Error during low memory cleanup", e)
+                }
+            }
         }
     }
+
+    /**
+     * Properly shutdown the application and clean up all resources
+     */
+    fun shutdown() {
+        if (isShuttingDown.getAndSet(true)) {
+            Log.d("BerryHarvestApp", "Shutdown already in progress")
+            return
+        }
+
+        Log.d("BerryHarvestApp", "Starting application shutdown")
+
+        try {
+            // Stop sync manager first
+            if (::syncManager.isInitialized) {
+                syncManager.shutdown()
+            }
+
+            // Close repositories
+            repositoryProvider.closeAll()
+
+            // Cancel all background jobs
+            applicationScope.cancel()
+
+            // Close all Realm instances
+            realmManager.closeAllInstances()
+
+            Log.d("BerryHarvestApp", "Application shutdown completed")
+        } catch (e: Exception) {
+            Log.e("BerryHarvestApp", "Error during shutdown", e)
+        }
+    }
+
+    /**
+     * Check if the application is shutting down
+     */
+    fun isShuttingDown(): Boolean = isShuttingDown.get()
+
+    /**
+     * Check if the application is properly initialized
+     */
+    fun isInitialized(): Boolean = isInitialized.get()
 }
