@@ -9,7 +9,6 @@ import com.example.berryharvest.data.model.Settings
 import com.example.berryharvest.data.model.Worker
 import io.realm.kotlin.Realm
 import io.realm.kotlin.RealmConfiguration
-import io.realm.kotlin.mongodb.App
 import io.realm.kotlin.mongodb.Credentials
 import io.realm.kotlin.ext.query
 import io.realm.kotlin.mongodb.sync.SyncConfiguration
@@ -18,6 +17,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.seconds
+import com.example.berryharvest.data.model.Row
 
 /**
  * Manages Realm instances in a coroutine-friendly way.
@@ -138,6 +138,7 @@ class RealmManager(private val application: BerryHarvestApplication) {
                 add(realm.query<Settings>(), "settings")
                 add(realm.query<PaymentRecord>(), "payment_records")
                 add(realm.query<PaymentBalance>(), "payment_balances")
+                add(realm.query<Row>(), "rows")
             }
             .waitForInitialRemoteData(INITIAL_SYNC_TIMEOUT)
             .build()

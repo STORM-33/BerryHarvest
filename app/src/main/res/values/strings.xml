@@ -15,4 +15,15 @@
     <string name="offline_mode">оффлайн</string>
     <string name="online_mode">онлайн</string>
     <string name="menu_payment">Оплата</string>
+
+    <string name="menu_row_collection">Збір рядків</string>
+    <string name="quarter_1">Квартал 1</string>
+    <string name="quarter_2">Квартал 2</string>
+    <string name="quarter_3">Квартал 3</string>
+    <string name="quarter_4">Квартал 4</string>
+    <string name="collected">Зібрано</string>
+    <string name="not_collected">Не зібрано</string>
+    <string name="all_rows">Всі рядки</string>
+    <string name="berry_variety">Сорт ягід</string>
+    <string name="row_number">Номер рядка</string>
 </resources>

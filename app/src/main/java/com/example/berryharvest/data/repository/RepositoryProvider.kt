@@ -30,6 +30,9 @@ class RepositoryProvider(private val application: Application) {
     val paymentRepository: PaymentRepository =
         PaymentRepositoryImpl(application, networkManager, databaseTransactionManager)
 
+    val rowRepository: RowRepository =
+        RowRepositoryImpl(application, networkManager, databaseTransactionManager)
+
     /**
      * Close all repositories and release resources.
      * Call this method when the application is shutting down.
@@ -40,6 +43,7 @@ class RepositoryProvider(private val application: Application) {
         (settingsRepository as BaseRepositoryImpl<*>).close()
         (gatherRepository as BaseRepositoryImpl<*>).close()
         (paymentRepository as BaseRepositoryImpl<*>).close()
+        (rowRepository as BaseRepositoryImpl<*>).close()
     }
     /**
      * Synchronize all repositories with the server.
@@ -78,6 +82,12 @@ class RepositoryProvider(private val application: Application) {
             allSuccessful = false
         }
 
+        //Row repository
+        val rowResult = rowRepository.syncPendingChanges()
+        if (rowResult !is Result.Success) {
+            allSuccessful = false
+        }
+
         return allSuccessful
     }
 
@@ -89,6 +99,7 @@ class RepositoryProvider(private val application: Application) {
                 assignmentRepository.hasPendingOperations() ||
                 settingsRepository.hasPendingOperations() ||
                 gatherRepository.hasPendingOperations() ||
+                rowRepository.hasPendingOperations() ||
                 paymentRepository.hasPendingOperations()
     }
 

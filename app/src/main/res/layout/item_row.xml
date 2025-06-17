@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="2dp"
+    android:gravity="center_vertical"
+    android:minHeight="10dp">
+
+    <!-- Row Number -->
+    <TextView
+        android:id="@+id/rowNumberTextView"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:textAppearance="?attr/textAppearanceBody1"
+        android:textStyle="bold"
+        android:text="Рядок 1" />
+
+    <!-- Sync Status Icon -->
+    <ImageView
+        android:id="@+id/syncStatusIcon"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:layout_marginEnd="8dp"
+        android:src="@drawable/ic_sync_small"
+        android:visibility="gone" />
+
+    <!-- Collection Status Checkbox -->
+    <CheckBox
+        android:id="@+id/collectedCheckBox"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:clickable="false"
+        android:focusable="false" />
+
+</LinearLayout>

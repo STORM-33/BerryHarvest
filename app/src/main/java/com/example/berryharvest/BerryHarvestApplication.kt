@@ -29,6 +29,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
+import com.example.berryharvest.data.model.Row
 
 /**
  * Main application class responsible for initializing global dependencies
@@ -72,7 +73,8 @@ class BerryHarvestApplication : Application() {
         Assignment::class,
         Settings::class,
         PaymentRecord::class,
-        PaymentBalance::class
+        PaymentBalance::class,
+        Row::class
     )
 
     // RealmManager instance
