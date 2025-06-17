@@ -28,6 +28,14 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:inputType="number"
-        android:hint="Кількість пінеток" />
+        android:hint="Кількість пінеток"
+        android:layout_marginBottom="12dp" />
+
+    <!-- NEW: Checkbox to mark row as gathered -->
+    <CheckBox
+        android:id="@+id/markRowGatheredCheckBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Позначити ряд як зібраний" />
 
 </LinearLayout>

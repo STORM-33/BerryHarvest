@@ -13,6 +13,7 @@ class Row : RealmObject {
     var isCollected: Boolean = false
     var createdAt: Long = System.currentTimeMillis()
     var collectedAt: Long? = null // When it was collected
+    var lastModifiedAt: Long = System.currentTimeMillis() // When collection status last changed
     var isSynced: Boolean = false
     var isDeleted: Boolean = false
 }

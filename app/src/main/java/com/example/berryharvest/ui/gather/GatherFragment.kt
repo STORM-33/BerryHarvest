@@ -2,20 +2,19 @@ package com.example.berryharvest.ui.gather
 
 import android.annotation.SuppressLint
 import android.content.ContentValues.TAG
-import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
-import androidx.fragment.app.Fragment
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
@@ -24,12 +23,14 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.example.berryharvest.BaseFragment
+import com.example.berryharvest.BerryHarvestApplication
 import com.example.berryharvest.R
 import com.example.berryharvest.data.model.Gather
 import com.example.berryharvest.data.model.Worker
 import com.example.berryharvest.data.repository.ConnectionState
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.zxing.integration.android.IntentIntegrator
+import io.realm.kotlin.ext.query
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -49,6 +50,10 @@ class GatherFragment : BaseFragment() {
     private lateinit var manualEntryFab: FloatingActionButton
 
     private lateinit var gatherAdapter: GatherAdapter
+
+    // Get row repository for row status updates
+    private val app: BerryHarvestApplication by lazy { requireActivity().application as BerryHarvestApplication }
+    private val rowRepository by lazy { app.repositoryProvider.rowRepository }
 
     // Scanner launcher
     private val scannerLauncher = registerForActivityResult(
@@ -343,6 +348,7 @@ class GatherFragment : BaseFragment() {
         val rowNumberTextView: TextView = dialogView.findViewById(R.id.rowNumberTextView)
         val punnetsEditText: EditText = dialogView.findViewById(R.id.punnetsEditText)
         val priceTextView: TextView = dialogView.findViewById(R.id.priceTextView)
+        val markRowGatheredCheckBox: CheckBox = dialogView.findViewById(R.id.markRowGatheredCheckBox)
 
         val formattedPrice = String.format(Locale.getDefault(), "%.2f", viewModel.punnetPrice.value)
 
@@ -357,6 +363,7 @@ class GatherFragment : BaseFragment() {
             .setPositiveButton("Зберегти") { _, _ ->
                 val numOfPunnetsText = punnetsEditText.text.toString()
                 val numOfPunnets = numOfPunnetsText.toIntOrNull()
+                val markRowGathered = markRowGatheredCheckBox.isChecked
 
                 when {
                     numOfPunnetsText.isBlank() -> {
@@ -369,12 +376,65 @@ class GatherFragment : BaseFragment() {
                         Toast.makeText(activity, "Кількість пінеток повинна бути більше 0", Toast.LENGTH_SHORT).show()
                     }
                     else -> {
-                        viewModel.saveGatherData(worker._id, rowNumber, numOfPunnets)
+                        // Save gather data and mark row as gathered if requested
+                        saveGatherWithRowUpdate(worker._id, rowNumber, numOfPunnets, markRowGathered)
                     }
                 }
             }
             .setNegativeButton("Скасувати", null)
             .show()
+    }
+
+    /**
+     * Save gather data and optionally mark row as gathered
+     */
+    private fun saveGatherWithRowUpdate(workerId: String, rowNumber: Int, numOfPunnets: Int, markRowGathered: Boolean) {
+        lifecycleScope.launch {
+            try {
+                // First save the gather data
+                viewModel.saveGatherData(workerId, rowNumber, numOfPunnets)
+
+                // Then mark row as gathered if requested
+                if (markRowGathered) {
+                    markRowAsGathered(rowNumber)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving gather with row update", e)
+                Toast.makeText(requireContext(), "Помилка: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
+     * Mark a row as gathered by finding it by row number
+     */
+    private suspend fun markRowAsGathered(rowNumber: Int) {
+        try {
+            val realm = app.getRealmInstance()
+            val row = realm.query<com.example.berryharvest.data.model.Row>(
+                "rowNumber == $0 AND isDeleted == false", rowNumber
+            ).first().find()
+
+            row?.let {
+                val result = rowRepository.updateRowCollectionStatus(it._id, true)
+                when (result) {
+                    is com.example.berryharvest.data.repository.Result.Success -> {
+                        Log.d(TAG, "Marked row $rowNumber as gathered")
+                        Toast.makeText(requireContext(), "Ряд $rowNumber позначено як зібраний", Toast.LENGTH_SHORT).show()
+                    }
+                    is com.example.berryharvest.data.repository.Result.Error -> {
+                        Log.e(TAG, "Error marking row as gathered: ${result.message}")
+                        Toast.makeText(requireContext(), "Помилка позначення ряду: ${result.message}", Toast.LENGTH_SHORT).show()
+                    }
+                    is com.example.berryharvest.data.repository.Result.Loading -> {
+                        // Loading state
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error finding row to mark as gathered", e)
+            Toast.makeText(requireContext(), "Помилка знаходження ряду", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun showAssignWorkerToRowDialog(worker: Worker) {
@@ -431,6 +491,7 @@ class GatherFragment : BaseFragment() {
             val rowNumberTextView: TextView = dialogView.findViewById(R.id.rowNumberTextView)
             val punnetsEditText: EditText = dialogView.findViewById(R.id.punnetsEditText)
             val priceTextView: TextView = dialogView.findViewById(R.id.priceTextView)
+            val markRowGatheredCheckBox: CheckBox = dialogView.findViewById(R.id.markRowGatheredCheckBox)
 
             val workerDetails = viewModel.recentGathers.value.find { it.gather._id == gather._id }
 
@@ -445,12 +506,16 @@ class GatherFragment : BaseFragment() {
             )
             priceTextView.text = "Ціна за пінетку: $formattedPrice₴"
 
+            // For edit mode, show checkbox to mark row as gathered
+            markRowGatheredCheckBox.text = "Позначити ряд ${currentGather.rowNumber} як зібраний"
+
             AlertDialog.Builder(requireContext())
                 .setTitle("Редагування запису")
                 .setView(dialogView)
                 .setPositiveButton("Оновити") { _, _ ->
                     val numOfPunnetsText = punnetsEditText.text.toString()
                     val numOfPunnets = numOfPunnetsText.toIntOrNull()
+                    val markRowGathered = markRowGatheredCheckBox.isChecked
 
                     when {
                         numOfPunnetsText.isBlank() -> {
@@ -463,7 +528,15 @@ class GatherFragment : BaseFragment() {
                             Toast.makeText(activity, "Кількість пінеток повинна бути більше 0", Toast.LENGTH_SHORT).show()
                         }
                         else -> {
-                            viewModel.updateGatherDetails(gather._id, numOfPunnets)
+                            lifecycleScope.launch {
+                                // Update gather details
+                                viewModel.updateGatherDetails(gather._id, numOfPunnets)
+
+                                // Mark row as gathered if requested
+                                if (markRowGathered && currentGather.rowNumber != null) {
+                                    markRowAsGathered(currentGather.rowNumber!!)
+                                }
+                            }
                         }
                     }
                 }

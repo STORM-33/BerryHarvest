@@ -61,4 +61,20 @@ interface RowRepository : BaseRepository<Row> {
      * Get rows by berry variety.
      */
     suspend fun getRowsByBerryVariety(berryVariety: String): Flow<Result<List<Row>>>
+
+    /**
+     * Check for and automatically expire collected rows that are older than 3 days.
+     * Returns the number of rows that were expired.
+     */
+    suspend fun expireOldCollectedRows(): Result<Int>
+
+    /**
+     * Get rows that will expire soon (within next 24 hours).
+     */
+    suspend fun getRowsExpiringSoon(): Result<List<Row>>
+
+    /**
+     * Get rows collected within a specific time range.
+     */
+    suspend fun getRowsCollectedInRange(startTime: Long, endTime: Long): Flow<Result<List<Row>>>
 }

@@ -15,9 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -29,6 +27,7 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
     private val assignmentRepository = app.repositoryProvider.assignmentRepository
     private val workerRepository = app.repositoryProvider.workerRepository
     private val networkStatusManager = app.networkStatusManager
+    private val rowRepository = app.repositoryProvider.rowRepository
 
     // Mutex for thread-safe operations
     private val operationMutex = Mutex()
@@ -502,6 +501,40 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error checking worker assignment", e)
+            Result.Error(e)
+        }
+    }
+
+    suspend fun checkRowCollectionStatus(rowNumber: Int): Result<Boolean> {
+        if (isCleanedUp.get()) return Result.Error(Exception("ViewModel is cleaned up"))
+
+        return try {
+            val realm = app.getRealmInstance()
+            val row = realm.query<com.example.berryharvest.data.model.Row>(
+                "rowNumber == $0 AND isDeleted == false", rowNumber
+            ).first().find()
+
+            Result.Success(row?.isCollected == true)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking row collection status", e)
+            Result.Error(e)
+        }
+    }
+
+    suspend fun markRowAsGathered(rowNumber: Int): Result<Boolean> {
+        if (isCleanedUp.get()) return Result.Error(Exception("ViewModel is cleaned up"))
+
+        return try {
+            val realm = app.getRealmInstance()
+            val row = realm.query<com.example.berryharvest.data.model.Row>(
+                "rowNumber == $0 AND isDeleted == false", rowNumber
+            ).first().find()
+
+            row?.let {
+                rowRepository.updateRowCollectionStatus(it._id, true)
+            } ?: Result.Error(Exception("Row not found"))
+        } catch (e: Exception) {
+            Log.e(TAG, "Error marking row as gathered", e)
             Result.Error(e)
         }
     }

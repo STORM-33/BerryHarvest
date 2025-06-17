@@ -2,6 +2,8 @@ package com.example.berryharvest
 
 import android.app.Application
 import android.util.Log
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.example.berryharvest.data.repository.RepositoryProvider
@@ -30,6 +32,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import com.example.berryharvest.data.model.Row
+import com.example.berryharvest.data.repository.RowExpirationManager
 
 /**
  * Main application class responsible for initializing global dependencies
@@ -58,6 +61,8 @@ class BerryHarvestApplication : Application() {
     // Global synchronization manager
     lateinit var syncManager: SyncManager
         private set
+
+    lateinit var rowExpirationManager: RowExpirationManager
 
     // Application-scoped coroutine scope for background operations
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + createCoroutineErrorHandler())
@@ -131,6 +136,21 @@ class BerryHarvestApplication : Application() {
 
         // Schedule periodic cleanup of unused Realm instances
         scheduleRealmInstanceCleanup()
+
+        rowExpirationManager = RowExpirationManager(this)
+        rowExpirationManager.startPeriodicExpiration()
+        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) {
+                super.onStart(owner)
+                // App came to foreground, check for expired rows
+                rowExpirationManager.checkNow()
+            }
+
+            override fun onStop(owner: LifecycleOwner) {
+                super.onStop(owner)
+                // App went to background, continue background checks
+            }
+        })
 
         Log.d("BerryHarvestApp", "Application initialization completed")
     }
@@ -357,6 +377,9 @@ class BerryHarvestApplication : Application() {
     override fun onTerminate() {
         shutdown()
         super.onTerminate()
+        if (::rowExpirationManager.isInitialized) {
+            rowExpirationManager.stopPeriodicExpiration()
+        }
     }
 
     // Clean up resources when memory is low

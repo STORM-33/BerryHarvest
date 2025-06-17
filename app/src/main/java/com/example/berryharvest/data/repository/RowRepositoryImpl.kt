@@ -10,6 +10,7 @@ import io.realm.kotlin.ext.query
 import io.realm.kotlin.query.RealmQuery
 import io.realm.kotlin.query.Sort
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import java.util.UUID
@@ -277,11 +278,18 @@ class RowRepositoryImpl(
         try {
             Log.d(logTag, "Updating collection status for row: $rowId to $isCollected")
 
+            val currentTime = System.currentTimeMillis()
+
             safeWrite {
                 val row = query<Row>("_id == $0", rowId).first().find()
                 row?.apply {
                     this.isCollected = isCollected
-                    this.collectedAt = if (isCollected) System.currentTimeMillis() else null
+                    this.lastModifiedAt = currentTime
+                    if (isCollected) {
+                        this.collectedAt = currentTime
+                    } else {
+                        this.collectedAt = null
+                    }
                     this.isSynced = networkManager.isNetworkAvailable()
                 }
             }
@@ -307,12 +315,19 @@ class RowRepositoryImpl(
         try {
             Log.d(logTag, "Updating collection status for ${rowIds.size} rows to $isCollected")
 
+            val currentTime = System.currentTimeMillis()
+
             safeWrite {
                 rowIds.forEach { rowId ->
                     val row = query<Row>("_id == $0", rowId).first().find()
                     row?.apply {
                         this.isCollected = isCollected
-                        this.collectedAt = if (isCollected) System.currentTimeMillis() else null
+                        this.lastModifiedAt = currentTime
+                        if (isCollected) {
+                            this.collectedAt = currentTime
+                        } else {
+                            this.collectedAt = null
+                        }
                         this.isSynced = networkManager.isNetworkAvailable()
                     }
                 }
@@ -466,5 +481,103 @@ class RowRepositoryImpl(
 
     override fun MutableRealm.findEntityById(id: String): Row? {
         return this.query<Row>("_id == $0", id).first().find()
+    }
+
+    /**
+     * Check for and automatically expire collected rows that are older than 3 days.
+     * Returns the number of rows that were expired.
+     */
+    override suspend fun expireOldCollectedRows(): Result<Int> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Checking for expired collected rows")
+
+            val threeDaysAgo = System.currentTimeMillis() - (3 * 24 * 60 * 60 * 1000L) // 3 days in milliseconds
+            var expiredCount = 0
+
+            // Find collected rows that are older than 3 days
+            val expiredRows = realm.query<Row>(
+                "isCollected == true AND collectedAt != null AND collectedAt < $0 AND isDeleted == false",
+                threeDaysAgo
+            ).find()
+
+            if (expiredRows.isNotEmpty()) {
+                Log.d(logTag, "Found ${expiredRows.size} expired rows")
+
+                safeWrite {
+                    expiredRows.forEach { row ->
+                        val liveRow = query<Row>("_id == $0", row._id).first().find()
+                        liveRow?.apply {
+                            isCollected = false
+                            collectedAt = null
+                            lastModifiedAt = System.currentTimeMillis()
+                            isSynced = networkManager.isNetworkAvailable()
+                            expiredCount++
+                        }
+                    }
+                }
+
+                // Track pending operations if offline
+                if (!networkManager.isNetworkAvailable()) {
+                    expiredRows.forEach { row ->
+                        addPendingOperation(
+                            PendingOperation.Update(row._id, entityType)
+                        )
+                    }
+                }
+
+                Log.d(logTag, "Expired $expiredCount collected rows")
+            } else {
+                Log.d(logTag, "No expired rows found")
+            }
+
+            Result.Success(expiredCount)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error expiring old collected rows", e)
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Get rows that will expire soon (within next 24 hours).
+     */
+    override suspend fun getRowsExpiringSoon(): Result<List<Row>> = withDatabaseContext { realm ->
+        try {
+            val now = System.currentTimeMillis()
+            val threeDaysAgo = now - (3 * 24 * 60 * 60 * 1000L)
+            val twoDaysAgo = now - (2 * 24 * 60 * 60 * 1000L)
+
+            // Rows collected between 2-3 days ago will expire within 24 hours
+            val expiringSoonRows = realm.query<Row>(
+                "isCollected == true AND collectedAt != null AND collectedAt >= $0 AND collectedAt < $1 AND isDeleted == false",
+                threeDaysAgo, twoDaysAgo
+            ).find().toList()
+
+            Log.d(logTag, "Found ${expiringSoonRows.size} rows expiring soon")
+            Result.Success(expiringSoonRows)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error getting rows expiring soon", e)
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Get rows collected within a specific time range.
+     */
+    override suspend fun getRowsCollectedInRange(startTime: Long, endTime: Long): Flow<Result<List<Row>>> = flow {
+        emit(Result.Loading)
+        try {
+            val realm = getRealm()
+            realm.query<Row>(
+                "isCollected == true AND collectedAt != null AND collectedAt >= $0 AND collectedAt <= $1 AND isDeleted == false",
+                startTime, endTime
+            )
+                .sort("quarter" to Sort.ASCENDING, "rowNumber" to Sort.ASCENDING)
+                .asFlow()
+                .map { Result.Success(it.list.toList()) }
+                .collect { emit(it) }
+        } catch (e: Exception) {
+            Log.e(logTag, "Error in getRowsCollectedInRange", e)
+            emit(Result.Error(e))
+        }
     }
 }

@@ -53,6 +53,8 @@ class RowCollectionViewModel(application: Application) : AndroidViewModel(applic
         initializeData()
         observeConnectionState()
         observeFilters()
+        // Check for expired rows on initialization
+        checkForExpiredRows()
     }
 
     private fun initializeData() {
@@ -66,6 +68,30 @@ class RowCollectionViewModel(application: Application) : AndroidViewModel(applic
             } catch (e: Exception) {
                 Log.e("RowCollectionViewModel", "Error initializing data", e)
                 _error.value = "Error initializing data: ${e.message}"
+            }
+        }
+    }
+
+    private fun checkForExpiredRows() {
+        viewModelScope.launch {
+            try {
+                val result = repository.expireOldCollectedRows()
+                when (result) {
+                    is Result.Success -> {
+                        val expiredCount = result.data
+                        if (expiredCount > 0) {
+                            Log.d("RowCollectionViewModel", "Expired $expiredCount old collected rows")
+                            // Reload data to reflect changes
+                            loadRows()
+                        }
+                    }
+                    is Result.Error -> {
+                        Log.e("RowCollectionViewModel", "Error checking for expired rows", result.exception)
+                    }
+                    is Result.Loading -> { /* Not applicable for this operation */ }
+                }
+            } catch (e: Exception) {
+                Log.e("RowCollectionViewModel", "Error checking for expired rows", e)
             }
         }
     }
@@ -272,6 +298,38 @@ class RowCollectionViewModel(application: Application) : AndroidViewModel(applic
                 app.syncManager.performSync(silent = true)
             } catch (e: Exception) {
                 Log.e("RowCollectionViewModel", "Error syncing changes", e)
+            }
+        }
+    }
+
+    /**
+     * Manually check for and expire old collected rows.
+     * Can be called periodically or when the app comes to foreground.
+     */
+    fun checkForExpiredRowsManually() {
+        checkForExpiredRows()
+    }
+
+    /**
+     * Get rows that will expire soon (within next 24 hours).
+     */
+    fun getRowsExpiringSoon(callback: (List<Row>) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val result = repository.getRowsExpiringSoon()
+                when (result) {
+                    is Result.Success -> {
+                        callback(result.data)
+                    }
+                    is Result.Error -> {
+                        Log.e("RowCollectionViewModel", "Error getting rows expiring soon", result.exception)
+                        callback(emptyList())
+                    }
+                    is Result.Loading -> { /* Not applicable */ }
+                }
+            } catch (e: Exception) {
+                Log.e("RowCollectionViewModel", "Error getting rows expiring soon", e)
+                callback(emptyList())
             }
         }
     }

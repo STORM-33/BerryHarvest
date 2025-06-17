@@ -108,8 +108,13 @@ class RowAdapter(
             quarterTitleTextView.text = "Квартал ${header.quarter}"
             progressTextView.text = "${header.collectedCount}/${header.totalCount} зібрано"
 
-            // Use neutral color for progress text
-            progressTextView.setTextColor(itemView.context.getColor(android.R.color.darker_gray))
+            // Use theme-aware text color that works in both light and dark modes
+            val context = itemView.context
+            val attrs = intArrayOf(android.R.attr.textColorPrimary)
+            val typedArray = context.obtainStyledAttributes(attrs)
+            val textColor = typedArray.getColor(0, context.getColor(android.R.color.black))
+            typedArray.recycle()
+            progressTextView.setTextColor(textColor)
         }
     }
 
