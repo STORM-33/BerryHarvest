@@ -57,3 +57,4 @@ inline fun <T> Result<T>.onErrorUI(crossinline block: (String) -> Unit): Result<
     }
     return this
 }
+

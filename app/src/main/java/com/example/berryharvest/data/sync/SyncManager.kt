@@ -25,8 +25,8 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Manages data synchronization across all repositories when the network becomes available.
- * Enhanced version with proper race condition prevention and better error handling.
+ * Enhanced SyncManager that prevents interference with UI loading.
+ * Includes startup grace period and intelligent sync scheduling.
  */
 class SyncManager(
     private val app: BerryHarvestApplication,
@@ -42,6 +42,7 @@ class SyncManager(
     private val isShutdown = AtomicBoolean(false)
     private val lastSyncTime = AtomicLong(0)
     private val syncAttempts = AtomicInteger(0)
+    private val startupTime = AtomicLong(System.currentTimeMillis())
 
     // Jobs for lifecycle management
     private var networkMonitoringJob: Job? = null
@@ -54,18 +55,27 @@ class SyncManager(
     private val SYNC_TIMEOUT = 30.seconds
     private val PERIODIC_SYNC_INTERVAL = 60.seconds
     private val PENDING_OPS_CHECK_INTERVAL = 30.seconds
+    private val STARTUP_GRACE_PERIOD = 5000L // 5 seconds after startup before allowing sync
 
-    // Add a sync status flow to allow UI components to observe sync state
+    // Sync status tracking
     private val _syncStatus = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
     val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
 
-    // Track the number of pending operations
     private val _pendingOperationsCount = MutableStateFlow(0)
     val pendingOperationsCount: StateFlow<Int> = _pendingOperationsCount.asStateFlow()
 
+    // UI loading protection
+    private val uiLoadingProtection = AtomicBoolean(true)
+
     init {
-        // Initialize pending operations count
         updatePendingOperationsCount()
+
+        // Disable UI loading protection after startup grace period
+        coroutineScope.launch {
+            delay(STARTUP_GRACE_PERIOD)
+            uiLoadingProtection.set(false)
+            Log.d(TAG, "UI loading protection disabled after grace period")
+        }
     }
 
     fun startSyncMonitoring() {
@@ -75,22 +85,27 @@ class SyncManager(
         }
 
         Log.d(TAG, "Starting sync monitoring")
-
-        // Cancel any existing jobs first
         stopSyncMonitoring()
 
-        // Setup network monitoring with proper exception handling
+        // Setup network monitoring with startup protection
         networkMonitoringJob = coroutineScope.launch {
             try {
                 app.networkStatusManager.connectionState
                     .filter { it is ConnectionState.Connected }
                     .collect {
                         if (!isShutdown.get()) {
-                            Log.d(TAG, "Network connection detected, triggering sync")
+                            Log.d(TAG, "Network connection detected")
+
+                            // Check if we're in startup grace period
+                            val timeSinceStartup = System.currentTimeMillis() - startupTime.get()
+                            if (uiLoadingProtection.get() && timeSinceStartup < STARTUP_GRACE_PERIOD) {
+                                Log.d(TAG, "Skipping sync during UI loading protection period")
+                                return@collect
+                            }
 
                             // Only attempt sync if we haven't synced recently
                             if (System.currentTimeMillis() - lastSyncTime.get() > MIN_SYNC_INTERVAL) {
-                                performSync()
+                                scheduleDelayedSync()
                             } else {
                                 Log.d(TAG, "Skipping sync, last sync was too recent")
                             }
@@ -99,17 +114,13 @@ class SyncManager(
             } catch (e: Exception) {
                 Log.e(TAG, "Error in network monitoring", e)
                 if (!isShutdown.get()) {
-                    // Restart monitoring after a delay if not shutting down
                     delay(5000)
                     startSyncMonitoring()
                 }
             }
         }
 
-        // Start periodic sync job
         startPeriodicSyncJob()
-
-        // Start pending operations monitoring
         startPendingOperationsMonitoring()
     }
 
@@ -128,7 +139,6 @@ class SyncManager(
         isShutdown.set(true)
         stopSyncMonitoring()
 
-        // Cancel any ongoing sync
         if (isSyncing.get()) {
             Log.d(TAG, "Cancelling ongoing sync due to shutdown")
         }
@@ -171,8 +181,10 @@ class SyncManager(
                 while (!isShutdown.get()) {
                     delay(PERIODIC_SYNC_INTERVAL)
 
-                    if (!isShutdown.get() && app.networkStatusManager.isNetworkAvailable()) {
-                        // Only sync if we have pending changes and haven't synced recently
+                    if (!isShutdown.get() &&
+                        app.networkStatusManager.isNetworkAvailable() &&
+                        !uiLoadingProtection.get()) {
+
                         if (hasPendingChanges() &&
                             System.currentTimeMillis() - lastSyncTime.get() > MIN_SYNC_INTERVAL) {
                             Log.d(TAG, "Performing periodic sync check")
@@ -194,6 +206,24 @@ class SyncManager(
     }
 
     /**
+     * Schedule a delayed sync to avoid interfering with immediate UI operations
+     */
+    private fun scheduleDelayedSync() {
+        coroutineScope.launch {
+            // Add a small delay to let UI operations complete
+            delay(2000)
+
+            if (!isShutdown.get() &&
+                app.networkStatusManager.isNetworkAvailable() &&
+                !uiLoadingProtection.get()) {
+
+                Log.d(TAG, "Executing scheduled delayed sync")
+                performSync(silent = true)
+            }
+        }
+    }
+
+    /**
      * Performs synchronization with proper race condition prevention and error handling
      */
     suspend fun performSync(silent: Boolean = false): Result<Boolean> {
@@ -201,14 +231,12 @@ class SyncManager(
             return Result.Error(Exception("SyncManager is shut down"))
         }
 
-        // Use mutex to prevent multiple simultaneous syncs
         return syncMutex.withLock {
             performSyncInternal(silent)
         }
     }
 
     private suspend fun performSyncInternal(silent: Boolean): Result<Boolean> {
-        // Double-check after acquiring lock
         if (isSyncing.get()) {
             Log.d(TAG, "Sync already in progress, skipping")
             return Result.Success(false)
@@ -224,7 +252,6 @@ class SyncManager(
                     }
                 }
 
-                // Check if we've exceeded max attempts
                 val currentAttempts = syncAttempts.incrementAndGet()
                 if (currentAttempts > MAX_SYNC_ATTEMPTS) {
                     Log.d(TAG, "Maximum sync attempts reached, resetting and skipping")
@@ -246,11 +273,10 @@ class SyncManager(
 
                 Log.d(TAG, "Starting sync process (attempt: $currentAttempts)")
 
-                // Set timeout for the entire sync operation
                 val result = withTimeout(SYNC_TIMEOUT) {
                     try {
-                        // Use the repositoryProvider's syncAllRepositories method
-                        val success = app.repositoryProvider.syncAllRepositories()
+                        // Use safe repository sync that won't interfere with UI flows
+                        val success = app.repositoryProvider.syncAllRepositoriesSafely()
 
                         if (success) {
                             Log.d(TAG, "Sync completed successfully")
@@ -265,15 +291,12 @@ class SyncManager(
                     }
                 }
 
-                // Handle result
                 when (result) {
                     is Result.Success -> {
-                        // Reset attempts on success
                         syncAttempts.set(0)
                         withContext(Dispatchers.Main) {
                             _syncStatus.value = SyncStatus.Completed
                         }
-                        // Update pending operations count after successful sync
                         updatePendingOperationsCount()
                     }
                     is Result.Error -> {
@@ -282,7 +305,6 @@ class SyncManager(
                         }
                     }
                     is Result.Loading -> {
-                        // This shouldn't happen in this context
                         Log.w(TAG, "Unexpected Loading result from sync")
                     }
                 }
@@ -329,32 +351,31 @@ class SyncManager(
     /**
      * Force a sync attempt regardless of timing constraints
      */
-    suspend fun forcSync(): Result<Boolean> {
+    suspend fun forceSync(): Result<Boolean> {
         Log.d(TAG, "Force sync requested")
-        lastSyncTime.set(0) // Reset timing constraint
-        syncAttempts.set(0) // Reset attempt counter
+        lastSyncTime.set(0)
+        syncAttempts.set(0)
+        uiLoadingProtection.set(false) // Disable protection for forced sync
         return performSync(silent = false)
     }
 
     /**
-     * Check if sync is currently in progress
+     * Enable UI loading protection temporarily
      */
+    fun enableUIProtection(durationMs: Long = STARTUP_GRACE_PERIOD) {
+        uiLoadingProtection.set(true)
+        coroutineScope.launch {
+            delay(durationMs)
+            uiLoadingProtection.set(false)
+            Log.d(TAG, "UI protection disabled after ${durationMs}ms")
+        }
+    }
+
     fun isSyncInProgress(): Boolean = isSyncing.get()
-
-    /**
-     * Get the time of the last successful sync
-     */
     fun getLastSyncTime(): Long = lastSyncTime.get()
-
-    /**
-     * Get current sync attempt count
-     */
     fun getCurrentSyncAttempts(): Int = syncAttempts.get()
 }
 
-/**
- * Represents the current status of the synchronization process.
- */
 sealed class SyncStatus {
     object Idle : SyncStatus()
     object InProgress : SyncStatus()

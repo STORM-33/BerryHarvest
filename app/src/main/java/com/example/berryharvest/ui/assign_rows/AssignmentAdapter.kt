@@ -7,6 +7,8 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.util.Log
 import androidx.recyclerview.widget.DiffUtil
@@ -27,18 +29,14 @@ class AssignmentAdapter(
 
     inner class AssignmentViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val rowNumberTextView: TextView = view.findViewById(R.id.rowNumberTextView)
+        val rowNumberSection: LinearLayout = view.findViewById(R.id.rowNumberSection)
+        val syncStatusIcon: ImageView = view.findViewById(R.id.syncStatusIcon)
         val workerRecyclerView: RecyclerView = view.findViewById(R.id.workerRecyclerView)
+        val emptyWorkersTextView: TextView = view.findViewById(R.id.emptyWorkersTextView)
         val removeRowButton: Button = view.findViewById(R.id.removeRowButton)
         val container: View = view.findViewById(R.id.assignmentContainer)
 
-        fun showDeleteRowDialog(rowNumber: Int) {
-            AlertDialog.Builder(itemView.context)
-                .setTitle("Видалити ряд")
-                .setMessage("Ви впевнені, що бажаєте видалити ряд $rowNumber?")
-                .setPositiveButton("Так") { _, _ -> onRemoveRowClick(rowNumber) }
-                .setNegativeButton("Ні", null)
-                .show()
-        }
+        // Removed duplicate dialog - let fragment handle confirmation
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): AssignmentViewHolder {
@@ -55,40 +53,60 @@ class AssignmentAdapter(
 
         Log.d("AssignmentAdapter", "Binding row $rowNumber with ${assignments.size} assignments")
 
-        // Set row number text with explicit visibility
-        holder.rowNumberTextView.visibility = View.VISIBLE
-        holder.rowNumberTextView.text = "Ряд $rowNumber"
+        // Set row number text
+        holder.rowNumberTextView.text = rowNumber.toString()
 
-        // Set up inner RecyclerView with the worker adapter
-        val workerAdapter = WorkerInRowAdapter(
-            assignments,
-            workerDetailsMap,
-            onMoveWorkerClick
-        )
-        holder.workerRecyclerView.visibility = View.VISIBLE
-        holder.workerRecyclerView.layoutManager = LinearLayoutManager(holder.itemView.context)
-        holder.workerRecyclerView.adapter = workerAdapter
+        // Handle empty state
+        if (assignments.isEmpty()) {
+            holder.workerRecyclerView.visibility = View.GONE
+            holder.emptyWorkersTextView.visibility = View.VISIBLE
+        } else {
+            holder.workerRecyclerView.visibility = View.VISIBLE
+            holder.emptyWorkersTextView.visibility = View.GONE
 
-        // Set background color based on sync status
+            // Set up inner RecyclerView with the worker adapter
+            val workerAdapter = WorkerInRowAdapter(
+                assignments,
+                workerDetailsMap,
+                onMoveWorkerClick
+            )
+            holder.workerRecyclerView.layoutManager = LinearLayoutManager(holder.itemView.context)
+            holder.workerRecyclerView.adapter = workerAdapter
+        }
+
+        // Handle sync status
         val hasUnsyncedAssignments = assignments.any { !it.isSynced }
         if (hasUnsyncedAssignments) {
+            // Show sync status icon
+            holder.syncStatusIcon.visibility = View.VISIBLE
+
+            // Add subtle background color to indicate unsynced state
             holder.container.setBackgroundColor(Color.parseColor("#15FFC107")) // Very light amber
-            // Add a small sync icon
-            holder.rowNumberTextView.setCompoundDrawablesWithIntrinsicBounds(0, 0, R.drawable.ic_sync_small, 0)
+
             Log.d("AssignmentAdapter", "Row $rowNumber is UNSYNCED")
         } else {
+            // Hide sync status icon
+            holder.syncStatusIcon.visibility = View.GONE
+
+            // Clear background color
             holder.container.setBackgroundColor(Color.TRANSPARENT)
-            holder.rowNumberTextView.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
+
             Log.d("AssignmentAdapter", "Row $rowNumber is SYNCED")
         }
 
-        // Long click to delete row
-        holder.rowNumberTextView.setOnLongClickListener {
-            holder.showDeleteRowDialog(rowNumber)
+        // Set up row number section click handlers
+        holder.rowNumberSection.setOnLongClickListener {
+            onRemoveRowClick(rowNumber)
             true
         }
 
-        // Hide the remove row button by default
+        // Add visual feedback for row number section
+        holder.rowNumberSection.setOnClickListener {
+            // Optional: You can add row-specific actions here
+            // For now, just provide haptic feedback or show a toast with row info
+        }
+
+        // Hide the remove row button (now handled by long-click on row number)
         holder.removeRowButton.visibility = View.GONE
     }
 
@@ -129,6 +147,15 @@ class AssignmentAdapter(
             return oldIds == newIds
         }
     }
+
+    override fun onCurrentListChanged(previousList: List<AssignmentGroup>, currentList: List<AssignmentGroup>) {
+        super.onCurrentListChanged(previousList, currentList)
+        Log.d("AssignmentAdapter", "List changed from ${previousList.size} to ${currentList.size} items")
+    }
+
+    override fun getItemCount(): Int {
+        val count = super.getItemCount()
+        Log.d("AssignmentAdapter", "getItemCount() returning $count")
+        return count
+    }
 }
-
-

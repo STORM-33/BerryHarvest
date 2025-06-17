@@ -1,8 +1,10 @@
 package com.example.berryharvest.ui.gather
 
 import android.annotation.SuppressLint
+import android.content.ContentValues.TAG
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -14,8 +16,10 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
@@ -26,7 +30,6 @@ import com.example.berryharvest.data.model.Worker
 import com.example.berryharvest.data.repository.ConnectionState
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.zxing.integration.android.IntentIntegrator
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -85,9 +88,18 @@ class GatherFragment : BaseFragment() {
         manualEntryFab = view.findViewById(R.id.manualEntryFab)
 
         setupUI()
-        setupObservers()
 
         return view
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        // Setup observers with proper lifecycle awareness
+        setupObservers()
+
+        // Ensure data is loaded
+        viewModel.ensureDataLoaded()
     }
 
     private fun setupUI() {
@@ -122,7 +134,74 @@ class GatherFragment : BaseFragment() {
     }
 
     private fun setupObservers() {
-        // Observe errors
+        // StateFlow observers with proper lifecycle management
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.punnetPrice.collect { price ->
+                    Log.d(TAG, "Punnet price updated: $price")
+                    updatePriceDisplay(price)
+                }
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.recentGathers.collect { gathers ->
+                    Log.d(TAG, "Recent gathers updated: ${gathers.size} items")
+                    updateGathersDisplay(gathers)
+                }
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.todayStats.collect { stats ->
+                    Log.d(TAG, "Today's stats updated: $stats")
+                    updateStatsDisplay(stats)
+                }
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.isLoading.collect { isLoading ->
+                    Log.d(TAG, "Loading state: $isLoading")
+                    loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
+                    if (!isLoading) {
+                        swipeRefreshLayout.isRefreshing = false
+                    }
+                }
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.unsyncedCount.collect { count ->
+                    Log.d(TAG, "Unsynced count: $count")
+                    updateUnsyncedIndicator(count)
+                }
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.connectionState.collect { state ->
+                    updateConnectionState(state)
+                }
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.dataInitialized.collect { initialized ->
+                    if (initialized) {
+                        loadingProgressBar.visibility = View.GONE
+                    }
+                }
+            }
+        }
+
+        // LiveData observers (keeping these for compatibility with existing ViewModel methods)
         viewModel.errorMessage.observe(viewLifecycleOwner) { message ->
             message?.let {
                 Toast.makeText(activity, message, Toast.LENGTH_LONG).show()
@@ -130,58 +209,14 @@ class GatherFragment : BaseFragment() {
             }
         }
 
-        // Observe worker assignment
         viewModel.workerAssignment.observe(viewLifecycleOwner) { pair ->
             pair?.let { (worker, rowNumber) ->
                 if (rowNumber == -1) {
-                    // Worker not assigned to a row
                     showAssignWorkerToRowDialog(worker)
                 } else {
-                    // Worker is assigned to a row
                     showGatherConfirmationDialog(worker, rowNumber)
                 }
                 viewModel.clearWorkerAssignment()
-            }
-        }
-
-        // Observe punnet price
-        viewModel.punnetPrice.observe(viewLifecycleOwner) { price ->
-            updatePriceDisplay(price)
-        }
-
-        // Observe recent gathers
-        launchWhenStarted("gathers-flow") {
-            viewModel.recentGathers.collect { gathers ->
-                updateGathersDisplay(gathers)
-            }
-        }
-
-        // Observe today's stats
-        launchWhenStarted("stats") {
-            viewModel.todayStats.collect { stats ->
-                updateStatsDisplay(stats)
-            }
-        }
-
-        // Observe loading state
-        launchWhenStarted("loading-state") {
-            viewModel.isLoading.collect { isLoading ->
-                loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
-                if (!isLoading) {
-                    swipeRefreshLayout.isRefreshing = false
-                }
-            }
-        }
-
-        // Observe connection state
-        viewModel.connectionState.observe(viewLifecycleOwner) { state ->
-            updateConnectionState(state)
-        }
-
-        // Observe unsynced count
-        launchWhenStarted("unsynced-count") {
-            viewModel.unsyncedCount.collect { count ->
-                updateUnsyncedIndicator(count)
             }
         }
     }
@@ -212,7 +247,6 @@ class GatherFragment : BaseFragment() {
                 viewModel.syncPendingChanges()
             }
         } else {
-            // If network is available, show "All synced"
             if (viewModel.connectionState.value is ConnectionState.Connected) {
                 syncStatusTextView.text = "Всі дані синхронізовано"
                 syncStatusTextView.setOnClickListener(null)
@@ -267,8 +301,7 @@ class GatherFragment : BaseFragment() {
         val dialogView = layoutInflater.inflate(R.layout.dialog_edit_price, null)
         val priceEditText = dialogView.findViewById<EditText>(R.id.priceEditText)
 
-        // Set current price
-        val currentPrice = viewModel.punnetPrice.value ?: 0f
+        val currentPrice = viewModel.punnetPrice.value
         priceEditText.setText(String.format(Locale.getDefault(), "%.2f", currentPrice))
 
         AlertDialog.Builder(requireContext())
@@ -311,8 +344,7 @@ class GatherFragment : BaseFragment() {
         val punnetsEditText: EditText = dialogView.findViewById(R.id.punnetsEditText)
         val priceTextView: TextView = dialogView.findViewById(R.id.priceTextView)
 
-        // Use consistent price format with decimal point
-        val formattedPrice = String.format(Locale.getDefault(), "%.2f", viewModel.punnetPrice.value ?: 0f)
+        val formattedPrice = String.format(Locale.getDefault(), "%.2f", viewModel.punnetPrice.value)
 
         workerNameTextView.text = "[${worker.sequenceNumber}] ${worker.fullName}"
         rowNumberTextView.text = "Ряд: $rowNumber"
@@ -337,7 +369,6 @@ class GatherFragment : BaseFragment() {
                         Toast.makeText(activity, "Кількість пінеток повинна бути більше 0", Toast.LENGTH_SHORT).show()
                     }
                     else -> {
-                        // Use ViewModel to save gather data
                         viewModel.saveGatherData(worker._id, rowNumber, numOfPunnets)
                     }
                 }
@@ -352,7 +383,6 @@ class GatherFragment : BaseFragment() {
         val moveButton = dialogView.findViewById<Button>(R.id.moveButton)
         val deleteButton = dialogView.findViewById<Button>(R.id.deleteButton)
 
-        // Change button texts for this use case
         moveButton.text = "Призначити"
         deleteButton.text = "Скасувати"
 
@@ -372,12 +402,10 @@ class GatherFragment : BaseFragment() {
                         return@setOnClickListener
                     }
 
-                    // Assign worker to row
                     viewModel.assignWorkerToRow(worker._id, rowNumber).observe(viewLifecycleOwner) { success ->
                         if (success) {
                             dismiss()
                             Toast.makeText(context, "Працівник успішно призначений на ряд $rowNumber", Toast.LENGTH_SHORT).show()
-                            // Show gather dialog with the new row assignment
                             showGatherConfirmationDialog(worker, rowNumber)
                         }
                     }
@@ -404,7 +432,6 @@ class GatherFragment : BaseFragment() {
             val punnetsEditText: EditText = dialogView.findViewById(R.id.punnetsEditText)
             val priceTextView: TextView = dialogView.findViewById(R.id.priceTextView)
 
-            // Find worker details
             val workerDetails = viewModel.recentGathers.value.find { it.gather._id == gather._id }
 
             workerNameTextView.text = workerDetails?.workerName ?: "Невідомий працівник"
@@ -414,7 +441,7 @@ class GatherFragment : BaseFragment() {
             val formattedPrice = String.format(
                 Locale.getDefault(),
                 "%.2f",
-                currentGather.punnetCost ?: viewModel.punnetPrice.value ?: 0f
+                currentGather.punnetCost ?: viewModel.punnetPrice.value
             )
             priceTextView.text = "Ціна за пінетку: $formattedPrice₴"
 
@@ -436,7 +463,6 @@ class GatherFragment : BaseFragment() {
                             Toast.makeText(activity, "Кількість пінеток повинна бути більше 0", Toast.LENGTH_SHORT).show()
                         }
                         else -> {
-                            // Use ViewModel to update gather
                             viewModel.updateGatherDetails(gather._id, numOfPunnets)
                         }
                     }
@@ -464,15 +490,12 @@ class GatherFragment : BaseFragment() {
         val punnetsEditText: EditText = dialogView.findViewById(R.id.punnetsEditText)
         val priceTextView: TextView = dialogView.findViewById(R.id.priceTextView)
 
-        // Hide worker and row fields since they'll be selected separately
         workerNameTextView.visibility = View.GONE
         rowNumberTextView.visibility = View.GONE
 
-        val formattedPrice = String.format(Locale.getDefault(), "%.2f", viewModel.punnetPrice.value ?: 0f)
+        val formattedPrice = String.format(Locale.getDefault(), "%.2f", viewModel.punnetPrice.value)
         priceTextView.text = "Ціна за пінетку: $formattedPrice₴"
 
-        // We'll first show a dialog to enter basic info,
-        // then select a worker in the next dialog
         AlertDialog.Builder(requireContext())
             .setTitle("Ручне введення")
             .setMessage("Введіть кількість пінеток:")
@@ -492,16 +515,10 @@ class GatherFragment : BaseFragment() {
                         Toast.makeText(activity, "Кількість пінеток повинна бути більше 0", Toast.LENGTH_SHORT).show()
                     }
                     else -> {
-                        // Show worker selection dialog
-                        // For simplicity, in a real app we would show a proper worker selector
-                        // Here we'll just show a dialog asking the user to scan a QR code
                         AlertDialog.Builder(requireContext())
                             .setTitle("Вибір працівника")
                             .setMessage("Для вибору працівника відскануйте його QR-код")
                             .setPositiveButton("Сканувати") { _, _ ->
-                                // Store the punnet count temporarily
-                                // In a real app, we'd save this in the ViewModel
-                                // Here we'll just start the scanner
                                 startScanner()
                             }
                             .setNegativeButton("Скасувати", null)

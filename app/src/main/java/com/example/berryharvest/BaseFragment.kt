@@ -2,6 +2,7 @@ package com.example.berryharvest
 
 import android.os.Bundle
 import android.view.View
+import androidx.activity.OnBackPressedCallback
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -16,8 +17,8 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Base Fragment class that handles coroutine lifecycle management to prevent memory leaks
- * Improved version with better lifecycle handling and leak prevention
+ * Enhanced Base Fragment class that handles coroutine lifecycle management and memory optimization
+ * to prevent memory leaks and improve performance
  */
 abstract class BaseFragment : Fragment(), LifecycleEventObserver {
 
@@ -27,11 +28,18 @@ abstract class BaseFragment : Fragment(), LifecycleEventObserver {
     // Track fragment lifecycle state
     private val isViewDestroyed = AtomicBoolean(false)
     private val isFragmentDestroyed = AtomicBoolean(false)
+    private val isBackHandlingEnabled = AtomicBoolean(true)
+
+    // Back press handling
+    private var backPressedCallback: OnBackPressedCallback? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Register lifecycle observer to handle all lifecycle events
         lifecycle.addObserver(this)
+
+        // Setup back press handling for better navigation
+        setupBackPressHandling()
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -39,6 +47,42 @@ abstract class BaseFragment : Fragment(), LifecycleEventObserver {
         isViewDestroyed.set(false)
         // Clear any previously tracked jobs that might have leaked
         cancelAllJobs()
+
+        // Enable back press callback when view is created
+        backPressedCallback?.isEnabled = isBackHandlingEnabled.get()
+    }
+
+    private fun setupBackPressHandling() {
+        backPressedCallback = object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                // Allow fragments to override back press behavior
+                if (!handleBackPress()) {
+                    // If fragment doesn't handle it, use default behavior
+                    isEnabled = false
+                    requireActivity().onBackPressedDispatcher.onBackPressed()
+                    isEnabled = true
+                }
+            }
+        }
+
+        // Add callback to activity's back press dispatcher
+        requireActivity().onBackPressedDispatcher.addCallback(this, backPressedCallback!!)
+    }
+
+    /**
+     * Override this method in child fragments to handle back press
+     * @return true if the fragment handled the back press, false otherwise
+     */
+    protected open fun handleBackPress(): Boolean {
+        return false
+    }
+
+    /**
+     * Enable or disable back press handling for this fragment
+     */
+    protected fun setBackHandlingEnabled(enabled: Boolean) {
+        isBackHandlingEnabled.set(enabled)
+        backPressedCallback?.isEnabled = enabled
     }
 
     override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
@@ -46,6 +90,12 @@ abstract class BaseFragment : Fragment(), LifecycleEventObserver {
             Lifecycle.Event.ON_PAUSE -> {
                 // Cancel non-essential jobs when fragment is paused
                 cancelNonEssentialJobs()
+                // Disable back handling when paused
+                backPressedCallback?.isEnabled = false
+            }
+            Lifecycle.Event.ON_RESUME -> {
+                // Re-enable back handling when resumed
+                backPressedCallback?.isEnabled = isBackHandlingEnabled.get()
             }
             Lifecycle.Event.ON_STOP -> {
                 // Cancel more jobs when fragment is stopped
@@ -55,6 +105,9 @@ abstract class BaseFragment : Fragment(), LifecycleEventObserver {
                 isFragmentDestroyed.set(true)
                 cancelAllJobs()
                 lifecycle.removeObserver(this)
+                // Remove back press callback
+                backPressedCallback?.remove()
+                backPressedCallback = null
             }
             else -> {
                 // Other lifecycle events don't require action
@@ -64,7 +117,7 @@ abstract class BaseFragment : Fragment(), LifecycleEventObserver {
 
     /**
      * Launch a coroutine that respects the fragment's lifecycle and prevents memory leaks
-     * Enhanced version with better lifecycle management
+     * Enhanced version with better lifecycle management and memory optimization
      */
     protected fun launchWhenStarted(
         key: String = "",
@@ -90,7 +143,7 @@ abstract class BaseFragment : Fragment(), LifecycleEventObserver {
                     }
                 }
             }.also { job ->
-                // Track the job for cleanup
+                // Track the job for cleanup with memory optimization
                 if (key.isNotEmpty()) {
                     coroutineJobs[key] = JobWrapper(job, essential)
                 }
@@ -148,6 +201,9 @@ abstract class BaseFragment : Fragment(), LifecycleEventObserver {
         keysToRemove.forEach { key ->
             coroutineJobs.remove(key)
         }
+
+        // Force garbage collection of cancelled jobs
+        System.gc()
     }
 
     /**
@@ -168,6 +224,9 @@ abstract class BaseFragment : Fragment(), LifecycleEventObserver {
         keysToRemove.forEach { key ->
             coroutineJobs.remove(key)
         }
+
+        // Force garbage collection of cancelled jobs
+        System.gc()
     }
 
     /**
@@ -178,6 +237,9 @@ abstract class BaseFragment : Fragment(), LifecycleEventObserver {
             CoroutineHandler.cancelSafely(jobWrapper.job)
         }
         coroutineJobs.clear()
+
+        // Force garbage collection to free memory
+        System.gc()
     }
 
     /**
@@ -206,6 +268,12 @@ abstract class BaseFragment : Fragment(), LifecycleEventObserver {
         // Final cleanup - ensure everything is cancelled
         cancelAllJobs()
         super.onDestroy()
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        // Cancel non-essential jobs on low memory
+        cancelNonEssentialJobs()
     }
 
     /**

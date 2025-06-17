@@ -62,46 +62,30 @@ class AssignmentRepositoryImpl(
     /**
      * Get all assignments grouped by row number.
      */
-    override fun getAllGroupedByRow(): Flow<Result<List<AssignmentGroup>>> = flow {
-        emit(Result.Loading)
-        try {
+    override suspend fun getAllGroupedByRow(): Flow<Result<List<AssignmentGroup>>> {
+        return try {
             val realm = getRealm()
 
-            // Use direct query instead of flow for more reliable results
-            val assignments = realm.query<Assignment>("isDeleted == false").find()
-
-            // Group assignments by row
-            val assignmentsByRow = assignments.groupBy { it.rowNumber }
-
-            // Convert to AssignmentGroup objects
-            val groups = assignmentsByRow.map { (rowNumber, assignments) ->
-                AssignmentGroup(rowNumber, assignments.toList())
-            }.sortedBy { it.rowNumber }
-
-            Log.d(logTag, "Created ${groups.size} assignment groups")
-            emit(Result.Success(groups))
-
-            // Now set up the flow for updates
-            realm.query<Assignment>("isDeleted == false").asFlow()
+            realm.query<Assignment>("isDeleted == false")
+                .asFlow()
                 .map { results ->
-                    val updatedGroups = results.list
+                    val groups = results.list
                         .groupBy { it.rowNumber }
                         .map { (rowNumber, assignments) ->
                             AssignmentGroup(rowNumber, assignments.toList())
                         }
                         .sortedBy { it.rowNumber }
 
-                    Result.Success(updatedGroups)
+                    Log.d(logTag, "Transformed ${results.list.size} assignments into ${groups.size} groups")
+                    Result.Success(groups) as Result<List<AssignmentGroup>>
                 }
                 .catch { e ->
-                    Log.e(logTag, "Error in flow updates", e)
+                    Log.e(logTag, "Error in getAllGroupedByRow flow", e)
                     emit(Result.Error(e))
                 }
-                .collect { emit(it) }
-
         } catch (e: Exception) {
-            Log.e(logTag, "Error in getAllGroupedByRow", e)
-            emit(Result.Error(e))
+            Log.e(logTag, "Error setting up getAllGroupedByRow", e)
+            flow { emit(Result.Error(e)) }
         }
     }
 

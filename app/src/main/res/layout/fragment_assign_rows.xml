@@ -44,6 +44,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1.5"
+                android:paddingTop="6dp"
                 android:layout_marginStart="4dp"
                 android:hint="Працівник">
 
@@ -54,43 +55,17 @@
             </com.google.android.material.textfield.TextInputLayout>
         </LinearLayout>
 
-        <LinearLayout
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/assignButton"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="55dp"
             android:layout_marginTop="4dp"
-            android:orientation="horizontal">
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/assignButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:minHeight="40dp"
-                android:padding="8dp"
-                android:text="Призначити на ряд"
-                android:textSize="12sp"
-                app:cornerRadius="4dp" />
-
-            <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/searchInputLayout"
-                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="8dp"
-                android:hint="Пошук ряда"
-                app:startIconDrawable="@android:drawable/ic_menu_search">
-
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/searchRowEditText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:inputType="number"
-                    android:maxLines="1" />
-            </com.google.android.material.textfield.TextInputLayout>
-        </LinearLayout>
+            android:minHeight="40dp"
+            android:padding="8dp"
+            android:text="Призначити на ряд"
+            android:textSize="12sp"
+            app:cornerRadius="4dp" />
     </LinearLayout>
-
 
     <View
         android:id="@+id/divider"
@@ -140,4 +115,3 @@
         app:layout_constraintTop_toTopOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
-

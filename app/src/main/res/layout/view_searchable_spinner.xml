@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:orientation="vertical">
+    android:layout_height="wrap_content">
 
     <EditText
         android:id="@+id/searchEditText"
@@ -14,18 +13,4 @@
         android:textColorHint="#757575"
         android:background="@drawable/edit_text_background"/>
 
-    <LinearLayout
-        android:id="@+id/dropdownContainer"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:visibility="gone"
-        android:background="@drawable/dropdown_background">
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/resultsRecyclerView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:maxHeight="200dp"/>
-    </LinearLayout>
-</LinearLayout>
+</FrameLayout>

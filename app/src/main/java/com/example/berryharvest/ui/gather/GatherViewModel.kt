@@ -12,18 +12,22 @@ import com.example.berryharvest.data.model.Gather
 import com.example.berryharvest.data.model.Worker
 import com.example.berryharvest.data.repository.ConnectionState
 import com.example.berryharvest.data.repository.Result
-import io.realm.kotlin.ext.query
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 class GatherViewModel(application: Application) : AndroidViewModel(application) {
     private val TAG = "GatherViewModel"
@@ -35,72 +39,303 @@ class GatherViewModel(application: Application) : AndroidViewModel(application) 
     private val settingsRepository = app.repositoryProvider.settingsRepository
     private val networkStatusManager = app.networkStatusManager
 
-    // Punnet price
-    private val _punnetPrice = MutableLiveData<Float>()
-    val punnetPrice: LiveData<Float> = _punnetPrice
+    // Mutex for thread-safe operations
+    private val operationMutex = Mutex()
+    private val dataLoadMutex = Mutex()
 
-    // Worker assignment info
-    private val _workerAssignment = MutableLiveData<Pair<Worker, Int>?>()
-    val workerAssignment: LiveData<Pair<Worker, Int>?> = _workerAssignment
+    // Atomic flags for state management
+    private val isInitialized = AtomicBoolean(false)
+    private val isCleanedUp = AtomicBoolean(false)
 
-    // Recently scanned gathers
+    // StateFlow for consistent reactive pattern
+    private val _punnetPrice = MutableStateFlow(0.0f)
+    val punnetPrice: StateFlow<Float> = _punnetPrice.asStateFlow()
+
     private val _recentGathers = MutableStateFlow<List<GatherWithDetails>>(emptyList())
     val recentGathers: StateFlow<List<GatherWithDetails>> = _recentGathers.asStateFlow()
 
-    // Today's statistics
     private val _todayStats = MutableStateFlow(TodayStats(0, 0f))
     val todayStats: StateFlow<TodayStats> = _todayStats.asStateFlow()
 
-    // Error messages
-    private val _errorMessage = MutableLiveData<String?>()
-    val errorMessage: LiveData<String?> = _errorMessage
-
-    // Success messages
-    private val _successMessage = MutableLiveData<Boolean>()
-    val successMessage: LiveData<Boolean> = _successMessage
-
-    // Loading state
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    // Connection state
-    private val _connectionState = MutableLiveData<ConnectionState>()
-    val connectionState: LiveData<ConnectionState> = _connectionState
-
-    // Unsynchronized gathers count
     private val _unsyncedCount = MutableStateFlow(0)
     val unsyncedCount: StateFlow<Int> = _unsyncedCount.asStateFlow()
 
+    private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
+    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
+    private val _dataInitialized = MutableStateFlow(false)
+    val dataInitialized: StateFlow<Boolean> = _dataInitialized.asStateFlow()
+
+    // LiveData for compatibility with existing UI (will migrate these gradually)
+    private val _workerAssignment = MutableLiveData<Pair<Worker, Int>?>()
+    val workerAssignment: LiveData<Pair<Worker, Int>?> = _workerAssignment
+
+    private val _errorMessage = MutableLiveData<String?>()
+    val errorMessage: LiveData<String?> = _errorMessage
+
+    private val _successMessage = MutableLiveData<Boolean>()
+    val successMessage: LiveData<Boolean> = _successMessage
+
+    // Cache for efficient data access
+    private var workersCache = mapOf<String, Worker>()
+    private var lastDataRefresh = 0L
+
     init {
-        loadPunnetPrice()
-        loadRecentGathers()
-        calculateTodayStats()
+        initializeViewModel()
+    }
+
+    private fun initializeViewModel() {
+        viewModelScope.launch {
+            if (isInitialized.getAndSet(true)) {
+                Log.d(TAG, "ViewModel already initialized, skipping")
+                return@launch
+            }
+
+            try {
+                // Load initial data synchronously
+                loadInitialDataSynchronously()
+
+                // Set up observers
+                setupObservers()
+
+                // Handle sync after initialization
+                handleInitialSync()
+
+            } catch (e: Exception) {
+                isInitialized.set(false)
+                Log.e(TAG, "Error initializing ViewModel", e)
+                _errorMessage.postValue("Помилка ініціалізації: ${e.message}")
+            }
+        }
+    }
+
+    private suspend fun loadInitialDataSynchronously() {
+        if (isCleanedUp.get()) return
+
+        try {
+            _isLoading.value = true
+
+            // Load all initial data concurrently
+            val priceDeferred = viewModelScope.async { loadPunnetPriceSync() }
+            val workersDeferred = viewModelScope.async { loadWorkersSync() }
+            val gathersDeferred = viewModelScope.async { loadGathersSync() }
+            val statsDeferred = viewModelScope.async { calculateStatsSync() }
+            val unsyncedDeferred = viewModelScope.async { countUnsyncedSync() }
+
+            // Wait for all to complete
+            awaitAll(priceDeferred, workersDeferred, gathersDeferred, statsDeferred, unsyncedDeferred)
+
+            _dataInitialized.value = true
+            Log.d(TAG, "Initial data loaded successfully")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading initial data", e)
+            _errorMessage.postValue("Помилка завантаження даних: ${e.message}")
+        } finally {
+            _isLoading.value = false
+        }
+    }
+
+    private suspend fun loadPunnetPriceSync(): Float {
+        return try {
+            val price = settingsRepository.getPunnetPrice()
+            _punnetPrice.value = price
+            Log.d(TAG, "Loaded punnet price: $price")
+            price
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading punnet price sync", e)
+            0.0f
+        }
+    }
+
+    private suspend fun loadWorkersSync(): Map<String, Worker> {
+        return try {
+            // Get workers directly for caching
+            when (val result = workerRepository.getAll().first()) {
+                is Result.Success -> {
+                    val workers = result.data.associateBy { it._id }
+                    workersCache = workers
+                    Log.d(TAG, "Loaded ${workers.size} workers for cache")
+                    workers
+                }
+                else -> {
+                    Log.w(TAG, "Failed to load workers for cache")
+                    emptyMap()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading workers sync", e)
+            emptyMap()
+        }
+    }
+
+    private suspend fun loadGathersSync(): List<GatherWithDetails> {
+        return try {
+            // Get today's gathers using repository
+            when (val result = gatherRepository.getTodayGathers()) {
+                is Result.Success -> {
+                    // result.data is already List<GatherWithDetails>
+                    val gathersWithDetails = result.data
+
+                    // Sort by dateTime in descending order (newest first)
+                    val sortedGathers = gathersWithDetails.sortedByDescending { gatherWithDetails ->
+                        try {
+                            // Parse the dateTime string to get a comparable date
+                            val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+                            gatherWithDetails.gather.dateTime?.let { dateTimeStr ->
+                                dateFormat.parse(dateTimeStr)?.time ?: 0L
+                            } ?: 0L
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error parsing dateTime: ${gatherWithDetails.gather.dateTime}", e)
+                            0L // If parsing fails, put it at the end
+                        }
+                    }
+
+                    // Update the recent gathers with sorted data
+                    _recentGathers.value = sortedGathers
+                    Log.d(TAG, "Loaded and sorted ${sortedGathers.size} today's gathers by date")
+                    sortedGathers
+                }
+                else -> {
+                    Log.w(TAG, "Failed to load today's gathers")
+                    emptyList()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading gathers sync", e)
+            emptyList()
+        }
+    }
+
+    private suspend fun calculateStatsSync(): TodayStats {
+        return try {
+            val gathers = _recentGathers.value
+            val totalPunnets = gathers.sumOf { it.gather.numOfPunnets ?: 0 }
+            val totalAmount = gathers.sumOf {
+                val punnets = it.gather.numOfPunnets ?: 0
+                val cost = it.gather.punnetCost ?: 0.0f
+                (punnets * cost).toDouble()
+            }.toFloat()
+
+            val stats = TodayStats(totalPunnets, totalAmount)
+            _todayStats.value = stats
+            Log.d(TAG, "Calculated today stats: $stats")
+            stats
+        } catch (e: Exception) {
+            Log.e(TAG, "Error calculating stats sync", e)
+            TodayStats(0, 0f)
+        }
+    }
+
+    private suspend fun countUnsyncedSync(): Int {
+        return try {
+            // Count unsynced gathers from current data
+            val count = _recentGathers.value.count { gatherWithDetails ->
+                // Since isSynced is Boolean?, we need to handle null
+                gatherWithDetails.gather.isSynced != true
+            }
+            _unsyncedCount.value = count
+            Log.d(TAG, "Counted $count unsynced gathers")
+            count
+        } catch (e: Exception) {
+            Log.e(TAG, "Error counting unsynced sync", e)
+            0
+        }
+    }
+
+    private fun setupObservers() {
+        if (isCleanedUp.get()) return
+
+        // Observe price changes
+        observePunnetPrice()
+
+        // Observe connection state
         observeConnectionState()
+
+        // Observe gather changes
+        observeGatherChanges()
+    }
+
+    private fun observePunnetPrice() {
+        viewModelScope.launch {
+            try {
+                settingsRepository.punnetPriceFlow
+                    .collect { newPrice ->
+                        if (isCleanedUp.get()) return@collect
+
+                        if (newPrice != _punnetPrice.value) {
+                            _punnetPrice.value = newPrice
+                            Log.d(TAG, "Price updated from repository: $newPrice")
+                        }
+                    }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error observing punnet price", e)
+            }
+        }
     }
 
     private fun observeConnectionState() {
         viewModelScope.launch {
-            networkStatusManager.connectionStateLiveData.observeForever { state ->
-                _connectionState.postValue(state)
+            try {
+                networkStatusManager.connectionState.collect { state ->
+                    if (isCleanedUp.get()) return@collect
 
-                // If we're back online, try to sync
-                if (state is ConnectionState.Connected) {
-                    syncPendingChanges()
+                    _connectionState.value = state
+
+                    if (state is ConnectionState.Connected) {
+                        scheduleDelayedSync()
+                    }
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error observing connection state", e)
             }
+        }
+    }
+
+    private fun observeGatherChanges() {
+        viewModelScope.launch {
+            try {
+                // Observe gather repository changes if available
+                // For now, we'll rely on manual refresh after operations
+                Log.d(TAG, "Gather change observation setup complete")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error setting up gather observation", e)
+            }
+        }
+    }
+
+    private fun handleInitialSync() {
+        viewModelScope.launch {
+            if (networkStatusManager.connectionState.value is ConnectionState.Connected) {
+                scheduleDelayedSync()
+            }
+        }
+    }
+
+    private fun scheduleDelayedSync() {
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(2000)
+            syncPendingChanges()
         }
     }
 
     fun syncPendingChanges() {
         viewModelScope.launch {
             try {
-                val result = app.syncManager.performSync()
-                if (result is Result.Success) {
-                    loadRecentGathers() // Refresh data after sync
-                    countUnsyncedGathers() // Update unsynced count
-                    _successMessage.postValue(true)
-                } else if (result is Result.Error) {
-                    _errorMessage.postValue("Синхронізація не вдалася: ${result.message}")
+                when (val result = app.syncManager.performSync(silent = true)) {
+                    is Result.Success -> {
+                        refreshData()
+                        _successMessage.postValue(true)
+                    }
+                    is Result.Error -> {
+                        _errorMessage.postValue("Синхронізація не вдалася: ${result.message}")
+                    }
+                    is Result.Loading -> {
+                        // Handle loading if needed
+                    }
                 }
             } catch (e: Exception) {
                 _errorMessage.postValue("Помилка синхронізації: ${e.message}")
@@ -108,178 +343,143 @@ class GatherViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun loadPunnetPrice() {
-        viewModelScope.launch {
-            try {
-                val price = settingsRepository.getPunnetPrice()
-                _punnetPrice.postValue(price)
-            } catch (e: Exception) {
-                _errorMessage.postValue("Помилка при завантаженні ціни: ${e.message}")
-                _punnetPrice.postValue(0.0f)
-            }
-        }
-    }
-
-    /**
-     * Handle QR scan result.
-     */
     fun handleScanResult(qrContent: String) {
         viewModelScope.launch {
-            _isLoading.value = true
+            dataLoadMutex.withLock {
+                _isLoading.value = true
 
-            try {
-                // Use worker repository to find worker by QR code
-                val result = workerRepository.getWorkerByQrCode(qrContent)
+                try {
+                    // Get worker by QR code
+                    val workerResult = workerRepository.getWorkerByQrCode(qrContent)
 
-                when (result) {
-                    is Result.Success -> {
-                        val worker = result.data
-                        if (worker != null) {
-                            // Check if worker is assigned to a row
-                            val assignmentResult = assignmentRepository.getWorkerAssignment(worker._id)
+                    when (workerResult) {
+                        is Result.Success -> {
+                            val worker = workerResult.data
+                            if (worker != null) {
+                                // Check assignment
+                                val assignmentResult = assignmentRepository.getWorkerAssignment(worker._id)
 
-                            when (assignmentResult) {
-                                is Result.Success -> {
-                                    val assignment = assignmentResult.data
-                                    val rowNumber = assignment?.rowNumber ?: -1
-
-                                    // Set the worker assignment (to be observed by UI)
-                                    _workerAssignment.value = Pair(worker, rowNumber)
+                                when (assignmentResult) {
+                                    is Result.Success -> {
+                                        val assignment = assignmentResult.data
+                                        val rowNumber = assignment?.rowNumber ?: -1
+                                        _workerAssignment.postValue(Pair(worker, rowNumber))
+                                    }
+                                    is Result.Error -> {
+                                        _errorMessage.postValue("Помилка перевірки призначення: ${assignmentResult.message}")
+                                    }
+                                    is Result.Loading -> {
+                                        // Loading handled by progress bar
+                                    }
                                 }
-                                is Result.Error -> {
-                                    _errorMessage.value = "Помилка перевірки призначення: ${assignmentResult.message}"
-                                    Log.e(TAG, "Error checking assignment", assignmentResult.exception)
-                                }
-                                is Result.Loading -> {
-                                    // Loading is already handled
-                                }
+                            } else {
+                                _errorMessage.postValue("Працівника не знайдено за QR кодом")
                             }
-                        } else {
-                            _errorMessage.value = "Працівника не знайдено за QR кодом"
+                        }
+                        is Result.Error -> {
+                            _errorMessage.postValue("Помилка сканування: ${workerResult.message}")
+                        }
+                        is Result.Loading -> {
+                            // Loading handled by progress bar
                         }
                     }
-                    is Result.Error -> {
-                        _errorMessage.value = "Помилка сканування: ${result.message}"
-                        Log.e(TAG, "Error scanning QR", result.exception)
-                    }
-                    is Result.Loading -> {
-                        // Loading is already handled
-                    }
+                } catch (e: Exception) {
+                    _errorMessage.postValue("Помилка: ${e.message}")
+                    Log.e(TAG, "Error handling scan", e)
+                } finally {
+                    _isLoading.value = false
                 }
-            } catch (e: Exception) {
-                _errorMessage.value = "Помилка: ${e.message}"
-                Log.e(TAG, "Error handling scan", e)
-            } finally {
-                _isLoading.value = false
             }
         }
     }
 
-    /**
-     * Save gather data.
-     */
     fun saveGatherData(workerId: String, rowNumber: Int, numOfPunnets: Int) {
         viewModelScope.launch {
-            _isLoading.value = true
+            operationMutex.withLock {
+                _isLoading.value = true
 
-            try {
-                // Get current punnet price
-                val priceResult = settingsRepository.getPunnetPrice()
-                val punnetPrice = _punnetPrice.value ?: priceResult
+                try {
+                    val currentPrice = _punnetPrice.value
+                    val result = gatherRepository.recordGather(workerId, rowNumber, numOfPunnets, currentPrice)
 
-                // Use gather repository to record gather
-                val result = gatherRepository.recordGather(workerId, rowNumber, numOfPunnets, punnetPrice)
-
-                when (result) {
-                    is Result.Success -> {
-                        _successMessage.value = true
-                        // Update stats and gathers after successful save
-                        loadRecentGathers()
-                        calculateTodayStats()
+                    when (result) {
+                        is Result.Success -> {
+                            _successMessage.postValue(true)
+                            refreshDataAfterOperation()
+                        }
+                        is Result.Error -> {
+                            _errorMessage.postValue("Помилка збереження даних: ${result.message}")
+                        }
+                        is Result.Loading -> {
+                            // Loading handled by progress bar
+                        }
                     }
-                    is Result.Error -> {
-                        _errorMessage.value = "Помилка збереження даних: ${result.message}"
-                        Log.e(TAG, "Error saving gather", result.exception)
-                    }
-                    is Result.Loading -> {
-                        // Loading is already handled
-                    }
+                } catch (e: Exception) {
+                    _errorMessage.postValue("Помилка: ${e.message}")
+                    Log.e(TAG, "Error saving gather", e)
+                } finally {
+                    _isLoading.value = false
                 }
-            } catch (e: Exception) {
-                _errorMessage.value = "Помилка: ${e.message}"
-                Log.e(TAG, "Error saving gather", e)
-            } finally {
-                _isLoading.value = false
             }
         }
     }
 
-    /**
-     * Update gather details.
-     */
     fun updateGatherDetails(gatherId: String, numOfPunnets: Int) {
         viewModelScope.launch {
-            _isLoading.value = true
+            operationMutex.withLock {
+                _isLoading.value = true
 
-            try {
-                // Use gather repository to update gather
-                val result = gatherRepository.updateGatherDetails(gatherId, numOfPunnets)
+                try {
+                    val result = gatherRepository.updateGatherDetails(gatherId, numOfPunnets)
 
-                when (result) {
-                    is Result.Success -> {
-                        _successMessage.value = true
-                        // Update stats and gathers after successful update
-                        loadRecentGathers()
-                        calculateTodayStats()
+                    when (result) {
+                        is Result.Success -> {
+                            _successMessage.postValue(true)
+                            refreshDataAfterOperation()
+                        }
+                        is Result.Error -> {
+                            _errorMessage.postValue("Помилка оновлення даних: ${result.message}")
+                        }
+                        is Result.Loading -> {
+                            // Loading handled by progress bar
+                        }
                     }
-                    is Result.Error -> {
-                        _errorMessage.value = "Помилка оновлення даних: ${result.message}"
-                        Log.e(TAG, "Error updating gather", result.exception)
-                    }
-                    is Result.Loading -> {
-                        // Loading is already handled
-                    }
+                } catch (e: Exception) {
+                    _errorMessage.postValue("Помилка: ${e.message}")
+                    Log.e(TAG, "Error updating gather", e)
+                } finally {
+                    _isLoading.value = false
                 }
-            } catch (e: Exception) {
-                _errorMessage.value = "Помилка: ${e.message}"
-                Log.e(TAG, "Error updating gather", e)
-            } finally {
-                _isLoading.value = false
             }
         }
     }
 
-    /**
-     * Delete gather record.
-     */
     fun deleteGather(gatherId: String) {
         viewModelScope.launch {
-            _isLoading.value = true
+            operationMutex.withLock {
+                _isLoading.value = true
 
-            try {
-                // Use gather repository to delete gather
-                val result = gatherRepository.delete(gatherId)
+                try {
+                    val result = gatherRepository.delete(gatherId)
 
-                when (result) {
-                    is Result.Success -> {
-                        _successMessage.value = true
-                        // Update stats and gathers after successful delete
-                        loadRecentGathers()
-                        calculateTodayStats()
+                    when (result) {
+                        is Result.Success -> {
+                            _successMessage.postValue(true)
+                            refreshDataAfterOperation()
+                        }
+                        is Result.Error -> {
+                            _errorMessage.postValue("Помилка видалення даних: ${result.message}")
+                        }
+                        is Result.Loading -> {
+                            // Loading handled by progress bar
+                        }
                     }
-                    is Result.Error -> {
-                        _errorMessage.value = "Помилка видалення даних: ${result.message}"
-                        Log.e(TAG, "Error deleting gather", result.exception)
-                    }
-                    is Result.Loading -> {
-                        // Loading is already handled
-                    }
+                } catch (e: Exception) {
+                    _errorMessage.postValue("Помилка: ${e.message}")
+                    Log.e(TAG, "Error deleting gather", e)
+                } finally {
+                    _isLoading.value = false
                 }
-            } catch (e: Exception) {
-                _errorMessage.value = "Помилка: ${e.message}"
-                Log.e(TAG, "Error deleting gather", e)
-            } finally {
-                _isLoading.value = false
             }
         }
     }
@@ -292,12 +492,9 @@ class GatherViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             try {
-                // Use the settings repository
-                val result = settingsRepository.updatePunnetPrice(newPrice)
-
-                when (result) {
+                when (val result = settingsRepository.updatePunnetPrice(newPrice)) {
                     is Result.Success -> {
-                        _punnetPrice.postValue(newPrice)
+                        Log.d(TAG, "Price update requested successfully")
                     }
                     is Result.Error -> {
                         _errorMessage.postValue("Помилка при оновленні ціни: ${result.message}")
@@ -312,161 +509,63 @@ class GatherViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun loadRecentGathers() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                _isLoading.value = true
-
-                val realm = app.getRealmInstance()
-
-                // Calculate start of day timestamp
-                val calendar = Calendar.getInstance()
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                calendar.set(Calendar.MILLISECOND, 0)
-                val startOfDayStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                    .format(calendar.time)
-
-                // Query gathers from today
-                val gathers = realm.query<Gather>("dateTime >= $0 AND isDeleted == false", startOfDayStr)
-                    .find()
-                    .sortedByDescending { it.dateTime }
-
-                // Create list of GatherWithDetails
-                val gathersWithDetails = mutableListOf<GatherWithDetails>()
-
-                for (gather in gathers) {
-                    val worker = realm.query<Worker>("_id == $0", gather.workerId).first().find()
-                    val workerName = if (worker != null) {
-                        "${worker.fullName} [${worker.sequenceNumber}]"
-                    } else {
-                        "Невідомий працівник"
-                    }
-
-                    gathersWithDetails.add(
-                        GatherWithDetails(
-                            gather = gather,
-                            workerName = workerName,
-                            dateTime = gather.dateTime
-                        )
-                    )
-                }
-
-                _recentGathers.value = gathersWithDetails
-                _isLoading.value = false
-            } catch (e: Exception) {
-                Log.e(TAG, "Error loading recent gathers", e)
-                _errorMessage.postValue("Помилка при завантаженні даних: ${e.message}")
-                _isLoading.value = false
-            }
-        }
-    }
-
-    private fun calculateTodayStats() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val realm = app.getRealmInstance()
-
-                // Calculate start of day timestamp
-                val calendar = Calendar.getInstance()
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                calendar.set(Calendar.MILLISECOND, 0)
-                val startOfDayStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-                    .format(calendar.time)
-
-                // Query gathers from today
-                val gathers = realm.query<Gather>("dateTime >= $0 AND isDeleted == false", startOfDayStr)
-                    .find()
-
-                // Calculate total punnets and amount
-                var totalPunnets = 0
-                var totalAmount = 0.0f
-
-                for (gather in gathers) {
-                    val punnets = gather.numOfPunnets ?: 0
-                    val cost = gather.punnetCost ?: 0.0f
-
-                    totalPunnets += punnets
-                    totalAmount += punnets * cost
-                }
-
-                _todayStats.value = TodayStats(totalPunnets, totalAmount)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error calculating today stats", e)
-            }
-        }
-    }
-
-    private fun countUnsyncedGathers() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val realm = app.getRealmInstance()
-                val count = realm.query<Gather>("isSynced == false AND isDeleted == false").count().find()
-                _unsyncedCount.value = count.toInt()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error counting unsynced gathers", e)
-            }
-        }
-    }
-
     fun assignWorkerToRow(workerId: String, rowNumber: Int): LiveData<Boolean> {
         val result = MutableLiveData<Boolean>()
 
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
+        viewModelScope.launch {
+            operationMutex.withLock {
                 _isLoading.value = true
 
-                // Create a new assignment
-                val assignment = Assignment().apply {
-                    _id = UUID.randomUUID().toString()
-                    this.workerId = workerId
-                    this.rowNumber = rowNumber
-                    isSynced = networkStatusManager.isNetworkAvailable()
+                try {
+                    val assignment = Assignment().apply {
+                        _id = UUID.randomUUID().toString()
+                        this.workerId = workerId
+                        this.rowNumber = rowNumber
+                        isSynced = networkStatusManager.isNetworkAvailable()
+                    }
+
+                    when (val assignResult = assignmentRepository.add(assignment)) {
+                        is Result.Success -> {
+                            result.postValue(true)
+                        }
+                        is Result.Error -> {
+                            _errorMessage.postValue("Помилка при призначенні працівника: ${assignResult.message}")
+                            result.postValue(false)
+                        }
+                        is Result.Loading -> {
+                            // Loading handled by progress bar
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error assigning worker to row", e)
+                    _errorMessage.postValue("Помилка при призначенні працівника: ${e.message}")
+                    result.postValue(false)
+                } finally {
+                    _isLoading.value = false
                 }
-
-                // Add assignment using repository
-                val assignResult = assignmentRepository.add(assignment)
-
-                when (assignResult) {
-                    is Result.Success -> {
-                        result.postValue(true)
-                    }
-                    is Result.Error -> {
-                        _errorMessage.postValue("Помилка при призначенні працівника: ${assignResult.message}")
-                        result.postValue(false)
-                    }
-                    is Result.Loading -> {
-                        // Handle loading if needed
-                    }
-                }
-
-                _isLoading.value = false
-            } catch (e: Exception) {
-                Log.e(TAG, "Error assigning worker to row", e)
-                _errorMessage.postValue("Помилка при призначенні працівника: ${e.message}")
-                result.postValue(false)
-                _isLoading.value = false
             }
         }
 
         return result
     }
 
-    fun clearErrorMessage() = _errorMessage.postValue(null)
-    fun clearWorkerAssignment() = _workerAssignment.postValue(null)
-    fun clearSuccessMessage() = _successMessage.postValue(false)
-
     fun getGatherById(gatherId: String): LiveData<Gather?> {
         val result = MutableLiveData<Gather?>()
 
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             try {
-                val realm = app.getRealmInstance()
-                val gather = realm.query<Gather>("_id == $0", gatherId).first().find()
-                result.postValue(gather)
+                when (val gatherResult = gatherRepository.getById(gatherId)) {
+                    is Result.Success -> {
+                        result.postValue(gatherResult.data)
+                    }
+                    is Result.Error -> {
+                        Log.e(TAG, "Error getting gather by ID", gatherResult.exception)
+                        result.postValue(null)
+                    }
+                    is Result.Loading -> {
+                        // Loading handled elsewhere
+                    }
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error getting gather by ID", e)
                 result.postValue(null)
@@ -477,9 +576,55 @@ class GatherViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun refreshData() {
-        loadRecentGathers()
-        calculateTodayStats()
-        countUnsyncedGathers()
+        viewModelScope.launch {
+            dataLoadMutex.withLock {
+                try {
+                    // Avoid too frequent refreshes
+                    val now = System.currentTimeMillis()
+                    if (now - lastDataRefresh < 1000) { // 1 second minimum between refreshes
+                        Log.d(TAG, "Skipping refresh, too soon since last refresh")
+                        return@withLock
+                    }
+                    lastDataRefresh = now
+
+                    loadInitialDataSynchronously()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error refreshing data", e)
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshDataAfterOperation() {
+        try {
+            // Quick refresh of essential data after operations
+            val gathersDeferred = viewModelScope.async { loadGathersSync() }
+            val statsDeferred = viewModelScope.async { calculateStatsSync() }
+            val unsyncedDeferred = viewModelScope.async { countUnsyncedSync() }
+
+            awaitAll(gathersDeferred, statsDeferred, unsyncedDeferred)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error refreshing data after operation", e)
+        }
+    }
+
+    fun ensureDataLoaded() {
+        if (!_dataInitialized.value && !isCleanedUp.get()) {
+            viewModelScope.launch {
+                loadInitialDataSynchronously()
+            }
+        }
+    }
+
+    // Clear methods for UI
+    fun clearErrorMessage() = _errorMessage.postValue(null)
+    fun clearWorkerAssignment() = _workerAssignment.postValue(null)
+    fun clearSuccessMessage() = _successMessage.postValue(false)
+
+    override fun onCleared() {
+        super.onCleared()
+        isCleanedUp.set(true)
+        Log.d(TAG, "ViewModel cleared")
     }
 }
 
@@ -488,3 +633,8 @@ data class TodayStats(
     val totalAmount: Float
 )
 
+data class GatherWithDetails(
+    val gather: Gather,
+    val workerName: String,
+    val dateTime: String? = null
+)

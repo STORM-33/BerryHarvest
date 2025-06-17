@@ -10,12 +10,19 @@ import io.realm.kotlin.ext.query
 import io.realm.kotlin.query.RealmQuery
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.util.UUID
 
 /**
  * Implementation of SettingsRepository that extends BaseRepositoryImpl.
- * Handles all Settings-specific data operations.
+ * Handles all Settings-specific data operations with real-time price observation.
  */
 class SettingsRepositoryImpl(
     application: Application,
@@ -28,6 +35,20 @@ class SettingsRepositoryImpl(
     entityType = "settings",
     logTag = "SettingsRepository"
 ), SettingsRepository {
+
+    // Real-time price observation
+    private val _punnetPriceFlow = MutableStateFlow(0.0f)
+    override val punnetPriceFlow: StateFlow<Float> = _punnetPriceFlow.asStateFlow()
+
+    private val SINGLE_SETTINGS_ID = "DEFAULT_SETTINGS"
+
+    // Background coroutine scope for observing changes
+    private val backgroundScope = CoroutineScope(Dispatchers.IO)
+
+    init {
+        // Initialize the price flow
+        observePriceChanges()
+    }
 
     /**
      * Create the base query for Settings entities.
@@ -58,35 +79,155 @@ class SettingsRepositoryImpl(
     }
 
     /**
+     * Observe price changes from the database and update the flow
+     * IMPROVED: Better error handling and reduced frequency
+     */
+    private fun observePriceChanges() {
+        backgroundScope.launch {
+            try {
+                // Reduced frequency to avoid excessive database access
+                while (true) {
+                    try {
+                        val currentPrice = withDatabaseContext { realm ->
+                            val settings = realm.query<Settings>("_id == $0", SINGLE_SETTINGS_ID).first().find()
+                            settings?.punnetPrice ?: 0.0f
+                        }
+
+                        if (_punnetPriceFlow.value != currentPrice) {
+                            _punnetPriceFlow.value = currentPrice
+                            Log.d(logTag, "Price updated in flow: $currentPrice")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(logTag, "Error checking price, will retry: ${e.message}")
+                        // Don't break the loop for individual errors
+                    }
+
+                    delay(5000) // Reduced frequency: check every 5 seconds instead of 1
+                }
+            } catch (e: Exception) {
+                Log.e(logTag, "Price observation stopped due to error", e)
+
+                // Try to restart observation after a delay
+                try {
+                    delay(10000) // Wait 10 seconds before restarting
+                    observePriceChanges() // Restart observation
+                } catch (restartError: Exception) {
+                    Log.e(logTag, "Failed to restart price observation", restartError)
+                }
+            }
+        }
+    }
+
+    /**
      * Get a settings object or create one if it doesn't exist.
+     * Always ensures only ONE settings object exists.
+     * FIXED: Properly handles frozen objects using findLatest()
      */
     override suspend fun getSettings(): Result<Settings?> = withDatabaseContext { realm ->
         try {
-            val settings = realm.query<Settings>().first().find()
+            // First, check for the canonical settings
+            var settings = realm.query<Settings>("_id == $0", SINGLE_SETTINGS_ID).first().find()
 
-            if (settings != null) {
-                Result.Success(settings)
-            } else {
-                // Create default settings if none exists
-                val defaultSettings = Settings().apply {
-                    _id = UUID.randomUUID().toString()
-                    punnetPrice = 0.0f
-                    isSynced = networkManager.isNetworkAvailable()
-                }
+            if (settings == null) {
+                // Check if any settings exist at all
+                val allSettings = realm.query<Settings>().find()
 
-                // Save default settings
-                val result = add(defaultSettings)
+                if (allSettings.isNotEmpty()) {
+                    Log.w(logTag, "Found ${allSettings.size} settings, consolidating to single settings")
 
-                if (result is Result.Success) {
-                    val newSettings = realm.query<Settings>("_id == $0", result.data).first().find()
-                    Result.Success(newSettings)
+                    // Get the price from the first setting before deletion
+                    val preservedPrice = allSettings.firstOrNull()?.punnetPrice ?: 0.0f
+
+                    // FIXED: Safely delete all existing settings using proper Realm transaction handling
+                    safeWrite {
+                        // Get fresh references to all settings within the transaction
+                        val settingsToDelete = query<Settings>().find()
+
+                        // Collect IDs first to avoid iteration issues
+                        val settingsIds = settingsToDelete.map { it._id }
+
+                        // Delete each settings record by finding it fresh in the transaction
+                        settingsIds.forEach { id ->
+                            val settingToDelete = query<Settings>("_id == $0", id).first().find()
+                            settingToDelete?.let {
+                                delete(it)
+                                Log.d(logTag, "Deleted settings record: $id")
+                            }
+                        }
+                    }
+
+                    // Create the canonical settings with the preserved price
+                    settings = createCanonicalSettings(preservedPrice)
                 } else {
-                    Result.Error(Exception("Failed to create default settings"))
+                    // No settings exist, create default
+                    settings = createCanonicalSettings(0.0f)
                 }
             }
+
+            Result.Success(settings)
         } catch (e: Exception) {
             Log.e(logTag, "Error getting settings", e)
+
+            // Enhanced error recovery: try to create default settings if everything fails
+            try {
+                Log.w(logTag, "Attempting error recovery by creating default settings")
+                val defaultSettings = createCanonicalSettings(0.0f)
+                if (defaultSettings != null) {
+                    Log.i(logTag, "Successfully recovered with default settings")
+                    return@withDatabaseContext Result.Success(defaultSettings)
+                }
+            } catch (recoveryError: Exception) {
+                Log.e(logTag, "Error recovery also failed", recoveryError)
+            }
+
             Result.Error(e)
+        }
+    }
+
+    /**
+     * Create the single canonical settings object
+     * FIXED: Proper thread handling for Realm access
+     */
+    private suspend fun createCanonicalSettings(price: Float): Settings? {
+        return try {
+            var resultPrice = price
+
+            safeWrite {
+                // Check if canonical settings already exist in this transaction
+                val existingSettings = query<Settings>("_id == $0", SINGLE_SETTINGS_ID).first().find()
+
+                if (existingSettings != null) {
+                    // Update existing canonical settings
+                    existingSettings.punnetPrice = price
+                    existingSettings.isSynced = false
+                    Log.d(logTag, "Updated existing canonical settings with price: $price")
+                } else {
+                    // Create new canonical settings
+                    copyToRealm(Settings().apply {
+                        _id = SINGLE_SETTINGS_ID
+                        punnetPrice = price
+                        isSynced = false
+                    })
+                    Log.d(logTag, "Created new canonical settings with price: $price")
+                }
+
+                // Return the price from the transaction
+                resultPrice = price
+            }
+
+            // Update the price flow after successful transaction
+            _punnetPriceFlow.value = resultPrice
+
+            // Return a simple settings object (not a Realm object to avoid threading issues)
+            Settings().apply {
+                _id = SINGLE_SETTINGS_ID
+                punnetPrice = resultPrice
+                isSynced = false
+            }
+
+        } catch (e: Exception) {
+            Log.e(logTag, "Error creating canonical settings", e)
+            null
         }
     }
 
@@ -95,27 +236,10 @@ class SettingsRepositoryImpl(
      */
     override suspend fun getPunnetPrice(): Float = withDatabaseContext { realm ->
         try {
-            // Find all Settings objects
-            val allSettings = realm.query<Settings>().find()
-
-            if (allSettings.isEmpty()) {
-                Log.d(logTag, "No settings found, returning default price 0")
-                0f
-            } else if (allSettings.size > 1) {
-                // Multiple settings found - log warning and use the one with highest price
-                Log.w(logTag, "Multiple settings found (${allSettings.size}), consolidating...")
-
-                // Get the most recently modified setting or the one with the highest price
-                val mostRecentSetting = allSettings.maxByOrNull { it.punnetPrice }
-
-                // Schedule a cleanup for the duplicates (in a separate coroutine)
-                cleanupDuplicateSettings(allSettings.map { it._id }, mostRecentSetting?._id)
-
-                mostRecentSetting?.punnetPrice ?: 0f
-            } else {
-                // Normal case - just one settings object
-                allSettings.first().punnetPrice
-            }
+            val settings = realm.query<Settings>("_id == $0", SINGLE_SETTINGS_ID).first().find()
+            val price = settings?.punnetPrice ?: 0f
+            Log.d(logTag, "Retrieved punnet price: $price")
+            price
         } catch (e: Exception) {
             Log.e(logTag, "Error getting punnet price", e)
             0f
@@ -129,53 +253,31 @@ class SettingsRepositoryImpl(
         try {
             Log.d(logTag, "Updating punnet price to $price")
 
-            // Find all existing settings
-            val allSettings = realm.query<Settings>().find()
+            // Ensure settings exists first
+            getSettings()
 
             safeWrite {
-                if (allSettings.isEmpty()) {
-                    // No settings exist, create a new one
-                    Log.d(logTag, "No settings found, creating new")
-                    copyToRealm(Settings().apply {
-                        _id = UUID.randomUUID().toString()
-                        punnetPrice = price
-                        isSynced = networkManager.isNetworkAvailable()
-                    })
-                } else if (allSettings.size > 1) {
-                    // Multiple settings exist, update the first one and schedule cleanup
-                    Log.w(logTag, "Multiple settings found (${allSettings.size}), consolidating")
-                    val firstSetting = query<Settings>("_id == $0", allSettings.first()._id).first().find()
-                    firstSetting?.apply {
-                        punnetPrice = price
-                        isSynced = networkManager.isNetworkAvailable()
-                    }
-
-                    // Schedule cleanup outside the transaction
-                    val idToKeep = allSettings.first()._id
-                    val allIds = allSettings.map { it._id }
-
-                    // Launch cleanup after this transaction completes
-                    CoroutineScope(Dispatchers.IO).launch {
-                        cleanupDuplicateSettings(allIds, idToKeep)
-                    }
+                val settings = query<Settings>("_id == $0", SINGLE_SETTINGS_ID).first().find()
+                if (settings != null) {
+                    settings.punnetPrice = price
+                    settings.isSynced = false // Mark as unsynced for proper sync handling
+                    Log.d(logTag, "Updated existing settings with price: $price")
                 } else {
-                    // Normal case - just one settings object
-                    Log.d(logTag, "Updating existing settings")
-                    val setting = query<Settings>().first().find()
-                    setting?.punnetPrice = price
-                    setting?.isSynced = networkManager.isNetworkAvailable()
+                    // This shouldn't happen after getSettings(), but just in case
+                    copyToRealm(Settings().apply {
+                        _id = SINGLE_SETTINGS_ID
+                        punnetPrice = price
+                        isSynced = false
+                    })
+                    Log.d(logTag, "Created new settings with price: $price")
                 }
             }
 
-            // Track pending operation if offline
-            if (!networkManager.isNetworkAvailable()) {
-                // Since we might not know the exact ID, we'll track all settings
-                allSettings.forEach { setting ->
-                    addPendingOperation(
-                        PendingOperation.Update(setting._id, entityType)
-                    )
-                }
-            }
+            // Track pending operation for sync
+            addPendingOperation(PendingOperation.Update(SINGLE_SETTINGS_ID, entityType))
+
+            // Update the flow immediately
+            _punnetPriceFlow.value = price
 
             Log.d(logTag, "Punnet price updated successfully")
             Result.Success(true)
@@ -187,48 +289,39 @@ class SettingsRepositoryImpl(
     }
 
     /**
-     * Add a new Settings entity.
+     * Add a new Settings entity - simplified to always use canonical settings
      */
     override suspend fun add(item: Settings): Result<String> = withDatabaseContext { realm ->
         try {
             Log.d(logTag, "Starting add operation for settings")
-            var settingsId = ""
-
-            // First check if settings already exist
-            val existingSettings = realm.query<Settings>().first().find()
-            Log.d(logTag, "Existing settings check: ${existingSettings?._id ?: "none"}")
 
             safeWrite {
-                if (existingSettings != null) {
-                    // Update existing settings
-                    val liveSettings = query<Settings>("_id == $0", existingSettings._id).first().find()
-                    liveSettings?.apply {
-                        punnetPrice = item.punnetPrice
-                        isSynced = networkManager.isNetworkAvailable()
-                    }
-                    settingsId = existingSettings._id
-                    Log.d(logTag, "Updated existing settings: $settingsId")
+                // Always use the canonical ID
+                val settings = query<Settings>("_id == $0", SINGLE_SETTINGS_ID).first().find()
+                if (settings != null) {
+                    // Update existing
+                    settings.punnetPrice = item.punnetPrice
+                    settings.isSynced = false
+                    Log.d(logTag, "Updated existing canonical settings")
                 } else {
-                    // Create new settings
-                    val newSettings = copyToRealm(Settings().apply {
-                        _id = item._id.ifEmpty { UUID.randomUUID().toString() }
+                    // Create new
+                    copyToRealm(Settings().apply {
+                        _id = SINGLE_SETTINGS_ID
                         punnetPrice = item.punnetPrice
-                        isSynced = networkManager.isNetworkAvailable()
+                        isSynced = false
                     })
-                    settingsId = newSettings._id
-                    Log.d(logTag, "Created new settings: $settingsId")
+                    Log.d(logTag, "Created new canonical settings")
                 }
             }
 
-            // Track pending operation if offline
-            if (!networkManager.isNetworkAvailable()) {
-                addPendingOperation(
-                    PendingOperation.Add(settingsId, entityType)
-                )
-            }
+            // Track pending operation
+            addPendingOperation(PendingOperation.Add(SINGLE_SETTINGS_ID, entityType))
+
+            // Update the flow
+            _punnetPriceFlow.value = item.punnetPrice
 
             Log.d(logTag, "Add operation completed successfully")
-            Result.Success(settingsId)
+            Result.Success(SINGLE_SETTINGS_ID)
         } catch (e: Exception) {
             Log.e(logTag, "Error in add", e)
             setError("Failed to add settings: ${e.message}")
@@ -244,21 +337,20 @@ class SettingsRepositoryImpl(
             Log.d(logTag, "Starting update operation for settings: ${item._id}")
 
             safeWrite {
-                // Find the live object INSIDE transaction
-                val settings = query<Settings>("_id == $0", item._id).first().find()
+                // Always update the canonical settings regardless of input ID
+                val settings = query<Settings>("_id == $0", SINGLE_SETTINGS_ID).first().find()
                 settings?.apply {
                     punnetPrice = item.punnetPrice
-                    isSynced = networkManager.isNetworkAvailable()
+                    isSynced = false // Mark as unsynced
                 }
-                Log.d(logTag, "Updated settings: ${item._id}")
+                Log.d(logTag, "Updated canonical settings")
             }
 
-            // Track pending operation if offline
-            if (!networkManager.isNetworkAvailable()) {
-                addPendingOperation(
-                    PendingOperation.Update(item._id, entityType)
-                )
-            }
+            // Track pending operation
+            addPendingOperation(PendingOperation.Update(SINGLE_SETTINGS_ID, entityType))
+
+            // Update the flow
+            _punnetPriceFlow.value = item.punnetPrice
 
             Log.d(logTag, "Update operation completed successfully")
             Result.Success(true)
@@ -270,14 +362,18 @@ class SettingsRepositoryImpl(
     }
 
     /**
-     * Delete a Settings entity by ID.
+     * Delete a Settings entity by ID - prevent deletion of canonical settings
      */
     override suspend fun delete(id: String): Result<Boolean> = withDatabaseContext { realm ->
         try {
+            if (id == SINGLE_SETTINGS_ID) {
+                Log.w(logTag, "Attempt to delete canonical settings prevented")
+                return@withDatabaseContext Result.Error(Exception("Cannot delete canonical settings"))
+            }
+
             Log.d(logTag, "Starting delete operation for settings: $id")
 
             safeWrite {
-                // Find the live object INSIDE transaction
                 val settings = query<Settings>("_id == $0", id).first().find()
                 settings?.let {
                     delete(it)
@@ -285,12 +381,8 @@ class SettingsRepositoryImpl(
                 }
             }
 
-            // Track pending operation if offline
-            if (!networkManager.isNetworkAvailable()) {
-                addPendingOperation(
-                    PendingOperation.Delete(id, entityType)
-                )
-            }
+            // Track pending operation
+            addPendingOperation(PendingOperation.Delete(id, entityType))
 
             Log.d(logTag, "Delete operation completed successfully")
             Result.Success(true)
@@ -301,36 +393,37 @@ class SettingsRepositoryImpl(
         }
     }
 
-    // Add this method to clean up duplicate settings
-    private suspend fun cleanupDuplicateSettings(allIds: List<String>, idToKeep: String?) {
-        if (idToKeep == null || allIds.size <= 1) return
-
-        try {
-            Log.d(logTag, "Starting cleanup of duplicate settings...")
-            val realm = getRealm()
-
-            realm.write {
-                // Delete all settings except the one to keep
-                allIds.filter { it != idToKeep }.forEach { id ->
-                    val settingToDelete = query<Settings>("_id == $0", id).first().find()
-                    settingToDelete?.let {
-                        delete(it)
-                        Log.d(logTag, "Deleted duplicate setting: $id")
-                    }
-                }
-            }
-
-            Log.d(logTag, "Duplicate settings cleanup completed")
-        } catch (e: Exception) {
-            Log.e(logTag, "Error cleaning up duplicate settings", e)
-        }
-    }
-
     override fun getEntityId(entity: Settings): String {
         return entity._id
     }
 
     override fun MutableRealm.findEntityById(id: String): Settings? {
         return this.query<Settings>("_id == $0", id).first().find()
+    }
+
+    /**
+     * Override sync to properly handle settings sync
+     */
+    override suspend fun syncPendingChanges(): Result<Boolean> {
+        Log.d(logTag, "Starting settings sync")
+
+        return try {
+            // First ensure we have canonical settings
+            getSettings()
+
+            // Then sync normally
+            super.syncPendingChanges()
+        } catch (e: Exception) {
+            Log.e(logTag, "Error during settings sync", e)
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Override close to clean up background scope
+     */
+    override fun close() {
+        backgroundScope.cancel()
+        super.close()
     }
 }

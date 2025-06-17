@@ -15,6 +15,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -29,10 +32,12 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
 
     // Mutex for thread-safe operations
     private val operationMutex = Mutex()
+    private val initializationMutex = Mutex()
 
     // Atomic flags for state management
     private val isInitialized = AtomicBoolean(false)
     private val isCleanedUp = AtomicBoolean(false)
+    private val isSyncInProgress = AtomicBoolean(false)
 
     private val _assignments = MutableStateFlow<List<AssignmentGroup>>(emptyList())
     val assignments: StateFlow<List<AssignmentGroup>> = _assignments.asStateFlow()
@@ -49,88 +54,148 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
     private val _dataInitialized = MutableStateFlow(false)
     val dataInitialized: StateFlow<Boolean> = _dataInitialized.asStateFlow()
 
-    // New Flow for worker details, exposed to the UI
+    // Worker details and all workers flows
     private val _workerDetails = MutableStateFlow<Map<String, Worker>>(mapOf())
     val workerDetails: StateFlow<Map<String, Worker>> = _workerDetails.asStateFlow()
 
-    // New Flow for all workers, for search and selection
     private val _allWorkers = MutableStateFlow<List<Worker>>(listOf())
     val allWorkers: StateFlow<List<Worker>> = _allWorkers.asStateFlow()
 
-    // This flag is used to signal when initialization is complete
     private val _realmInitialized = MutableStateFlow(false)
     val realmInitialized: StateFlow<Boolean> = _realmInitialized.asStateFlow()
 
+    // Cache for stable data during sync
+    private var dataCache: List<AssignmentGroup> = emptyList()
+
     init {
-        observeAssignments()
-        observeWorkers()
-        observeConnectionState()
+        initializeViewModel()
     }
 
-    private fun observeAssignments() {
-        if (isCleanedUp.get()) return
-
+    private fun initializeViewModel() {
         viewModelScope.launch {
-            try {
-                _isLoading.value = true
+            initializationMutex.withLock {
+                if (isInitialized.getAndSet(true)) return@withLock
 
-                assignmentRepository.getAllGroupedByRow().collect { result ->
-                    if (isCleanedUp.get()) return@collect
+                try {
+                    // Load initial data immediately and synchronously
+                    loadInitialDataSynchronously()
 
-                    _isLoading.value = false
+                    // Then set up observers for live updates
+                    setupObservers()
 
-                    when (result) {
-                        is Result.Success -> {
-                            Log.d(TAG, "Successfully loaded ${result.data.size} assignment groups")
-                            _assignments.value = result.data
-                            _error.value = null
-                            _realmInitialized.value = true
+                    // Finally, handle sync with proper isolation
+                    handleInitialSync()
 
-                            // When assignments change, update worker details
-                            updateWorkerDetails(result.data)
-                        }
-                        is Result.Error -> {
-                            Log.e(TAG, "Error loading assignments", result.exception)
-                            _error.value = "Помилка завантаження даних: ${result.message}"
-
-                            // Add direct query fallback for offline mode
-                            handleAssignmentLoadError()
-                        }
-                        is Result.Loading -> {
-                            _isLoading.value = true
-                        }
-                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error initializing ViewModel", e)
+                    _error.value = "Помилка ініціалізації: ${e.message}"
                 }
-            } catch (e: CancellationException) {
-                Log.d(TAG, "Assignment observation cancelled")
-            } catch (e: Exception) {
-                Log.e(TAG, "Unexpected error observing assignments", e)
-                _isLoading.value = false
-                _error.value = "Помилка: ${e.message}"
             }
         }
     }
 
-    private suspend fun handleAssignmentLoadError() {
-        try {
-            val realm = app.getRealmInstance()
-            val localAssignments = realm.query<Assignment>().find()
+    private suspend fun loadInitialDataSynchronously() {
+        if (isCleanedUp.get()) return
 
-            // Group them manually
-            val groupedAssignments = localAssignments
+        try {
+            _isLoading.value = true
+            val realm = app.getRealmInstance()
+
+            // Load workers first (they're needed for assignment display)
+            val workers = realm.query<Worker>().find().toList()
+            _allWorkers.value = workers
+            val workerMap = workers.associateBy { it._id }
+            _workerDetails.value = workerMap
+            Log.d(TAG, "Pre-loaded ${workers.size} workers for UI")
+
+            // Load assignments
+            val assignments = realm.query<Assignment>("isDeleted == false").find()
+            val groupedAssignments = assignments
                 .groupBy { it.rowNumber }
-                .map { (rowNumber, assignments) ->
-                    AssignmentGroup(rowNumber, assignments.toList())
+                .map { (rowNumber, assignmentList) ->
+                    AssignmentGroup(rowNumber, assignmentList.toList())
                 }
                 .sortedBy { it.rowNumber }
 
-            if (groupedAssignments.isNotEmpty()) {
-                _assignments.value = groupedAssignments
-                updateWorkerDetails(groupedAssignments)
-                _error.value = null // Clear error if fallback succeeded
-            }
+            // Update state atomically
+            dataCache = groupedAssignments
+            _assignments.value = groupedAssignments
+            _dataInitialized.value = true
+            _realmInitialized.value = true
+
+            Log.d(TAG, "Initial data loaded: ${groupedAssignments.size} assignment groups")
+
         } catch (e: Exception) {
-            Log.e(TAG, "Error loading fallback local data", e)
+            Log.e(TAG, "Error loading initial data", e)
+            _error.value = "Помилка завантаження даних: ${e.message}"
+        } finally {
+            _isLoading.value = false
+        }
+    }
+
+    private fun setupObservers() {
+        if (isCleanedUp.get()) return
+
+        // Observe assignments with sync protection
+        observeAssignmentsWithSyncProtection()
+
+        // Observe workers
+        observeWorkers()
+
+        // Observe connection state
+        observeConnectionState()
+    }
+
+    private fun observeAssignmentsWithSyncProtection() {
+        viewModelScope.launch {
+            try {
+                assignmentRepository.getAllGroupedByRow()
+                    .distinctUntilChanged()
+                    .collect { result ->
+                        if (isCleanedUp.get()) return@collect
+
+                        when (result) {
+                            is Result.Success -> {
+                                val newData = result.data
+
+                                // Only update if we're not syncing and data actually changed
+                                if (!isSyncInProgress.get()) {
+                                    if (newData != _assignments.value) {
+                                        dataCache = newData
+                                        _assignments.value = newData
+                                        updateWorkerDetails(newData)
+                                        Log.d(TAG, "Updated assignments: ${newData.size} groups")
+                                    }
+                                } else {
+                                    // During sync, update cache but don't clear UI
+                                    if (newData.isNotEmpty()) {
+                                        dataCache = newData
+                                    }
+                                    Log.d(TAG, "Sync in progress, cached ${newData.size} groups")
+                                }
+
+                                _error.value = null
+                            }
+
+                            is Result.Error -> {
+                                if (!isSyncInProgress.get()) {
+                                    Log.e(TAG, "Error loading assignments", result.exception)
+                                    _error.value = "Помилка завантаження даних: ${result.message}"
+                                }
+                            }
+
+                            is Result.Loading -> {
+                                if (!_dataInitialized.value) {
+                                    _isLoading.value = true
+                                }
+                            }
+                        }
+                    }
+            } catch (e: CancellationException) {
+                Log.d(TAG, "Assignment observation cancelled")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error observing assignments", e)
+            }
         }
     }
 
@@ -145,19 +210,16 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
                     when (result) {
                         is Result.Success -> {
                             val workers = result.data
-                            // Update all workers for search
                             _allWorkers.value = workers
-
-                            // Create a map for quick lookup
                             val workerMap = workers.associateBy { it._id }
                             _workerDetails.value = workerMap
                         }
                         is Result.Error -> {
-                            _error.value = "Помилка завантаження працівників: ${result.message}"
                             Log.e(TAG, "Error loading workers", result.exception)
+                            _error.value = "Помилка завантаження працівників: ${result.message}"
                         }
                         is Result.Loading -> {
-                            // We're already tracking loading state elsewhere
+                            // Loading handled elsewhere
                         }
                     }
                 }
@@ -165,7 +227,6 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
                 Log.d(TAG, "Worker observation cancelled")
             } catch (e: Exception) {
                 Log.e(TAG, "Error observing workers", e)
-                _error.value = "Помилка завантаження працівників: ${e.message}"
             }
         }
     }
@@ -175,16 +236,15 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
 
         viewModelScope.launch {
             try {
-                // Use the centralized network status manager instead of repository
                 networkStatusManager.connectionState.collect { state ->
                     if (isCleanedUp.get()) return@collect
 
                     _connectionState.value = state
 
-                    // If we're back online, try to sync any pending changes
-                    if (state is ConnectionState.Connected) {
-                        Log.d(TAG, "Network is available, syncing pending changes")
-                        syncPendingChanges()
+                    // Only sync after initial data is loaded
+                    if (state is ConnectionState.Connected && _dataInitialized.value) {
+                        Log.d(TAG, "Network available, scheduling sync")
+                        scheduleDelayedSync()
                     }
                 }
             } catch (e: CancellationException) {
@@ -195,65 +255,51 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun loadInitialData() {
-        // Only load if not already initialized
-        if (_dataInitialized.value || isCleanedUp.get()) return
+    private fun handleInitialSync() {
+        if (isCleanedUp.get()) return
 
         viewModelScope.launch {
-            operationMutex.withLock {
-                if (_dataInitialized.value || isCleanedUp.get()) return@withLock
-
-                try {
-                    _isLoading.value = true
-
-                    // Get direct reference to Realm
-                    val realm = app.getRealmInstance()
-
-                    // First load workers to ensure they're available for display
-                    val workers = realm.query<Worker>().find().toList()
-                    _allWorkers.value = workers
-                    Log.d(TAG, "Pre-loaded ${workers.size} workers for UI")
-
-                    // Load assignments directly
-                    val assignments = realm.query<Assignment>().find()
-
-                    // Group them manually
-                    val groupedAssignments = assignments
-                        .groupBy { it.rowNumber }
-                        .map { (rowNumber, assignments) ->
-                            AssignmentGroup(rowNumber, assignments.toList())
-                        }
-                        .sortedBy { it.rowNumber }
-
-                    if (groupedAssignments.isNotEmpty()) {
-                        Log.d(TAG, "Directly loaded ${groupedAssignments.size} assignment groups")
-                        _assignments.value = groupedAssignments
-
-                        // Also update worker details
-                        updateWorkerDetails(groupedAssignments)
-                    }
-
-                    _dataInitialized.value = true
-
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error in loadInitialData", e)
-                    _error.value = "Помилка завантаження даних: ${e.message}"
-                } finally {
-                    // Always ensure loading state is reset
-                    _isLoading.value = false
-                }
+            // Only sync if we have network and haven't synced recently
+            if (networkStatusManager.connectionState.value is ConnectionState.Connected) {
+                // Delay initial sync to avoid interfering with UI loading
+                delay(2000)
+                performProtectedSync()
             }
         }
     }
 
-    fun ensureLoadingStateReset() {
+    private fun scheduleDelayedSync() {
         viewModelScope.launch {
-            if (_isLoading.value && !isCleanedUp.get()) {
-                // Give a short delay for any ongoing operation to complete
-                delay(300)
-                _isLoading.value = false
-                Log.d(TAG, "Force reset loading state to avoid UI being stuck")
-            }
+            // Small delay to avoid immediate sync interference
+            delay(1000)
+            performProtectedSync()
+        }
+    }
+
+    private suspend fun performProtectedSync() {
+        if (isCleanedUp.get() || isSyncInProgress.getAndSet(true)) return
+
+        try {
+            Log.d(TAG, "Starting protected sync")
+
+            // Use global sync manager
+            app.syncManager.performSync(silent = true)
+
+            // After sync, restore UI if needed
+            restoreUIAfterSync()
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during sync", e)
+        } finally {
+            isSyncInProgress.set(false)
+        }
+    }
+
+    private suspend fun restoreUIAfterSync() {
+        // If UI got cleared during sync, restore from cache
+        if (_assignments.value.isEmpty() && dataCache.isNotEmpty()) {
+            _assignments.value = dataCache
+            Log.d(TAG, "Restored UI from cache: ${dataCache.size} groups")
         }
     }
 
@@ -262,7 +308,6 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
 
         viewModelScope.launch {
             try {
-                // Get all worker IDs from assignments
                 val workerIds = assignmentGroups
                     .flatMap { it.assignments }
                     .map { it.workerId }
@@ -270,24 +315,26 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
 
                 if (workerIds.isEmpty()) return@launch
 
-                // Load worker details by IDs if needed
-                if (workerIds.any { !_workerDetails.value.containsKey(it) }) {
-                    workerRepository.getWorkersByIds(workerIds).collect { result ->
+                // Only load if we don't have all workers
+                val currentWorkers = _workerDetails.value
+                val missingWorkerIds = workerIds.filter { !currentWorkers.containsKey(it) }
+
+                if (missingWorkerIds.isNotEmpty()) {
+                    workerRepository.getWorkersByIds(missingWorkerIds).collect { result ->
                         if (isCleanedUp.get()) return@collect
 
                         when (result) {
                             is Result.Success -> {
-                                val newWorkerMap = result.data.associateBy { it._id }
-                                _workerDetails.value = newWorkerMap
+                                val newWorkers = result.data.associateBy { it._id }
+                                _workerDetails.value = currentWorkers + newWorkers
                             }
                             is Result.Error -> {
                                 Log.e(TAG, "Error loading worker details", result.exception)
                             }
                             is Result.Loading -> {
-                                // We're already tracking loading state elsewhere
+                                // Loading handled elsewhere
                             }
                         }
-                        // Only collect first emission to avoid continuous updates
                         return@collect
                     }
                 }
@@ -297,128 +344,38 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    suspend fun deleteAllRows(): Result<Boolean> {
+    // Remove the old loadInitialData() method and replace with this
+    fun ensureDataLoaded() {
+        if (!_dataInitialized.value && !isCleanedUp.get()) {
+            viewModelScope.launch {
+                loadInitialDataSynchronously()
+            }
+        }
+    }
+
+    fun ensureLoadingStateReset() {
+        viewModelScope.launch {
+            if (_isLoading.value && !isCleanedUp.get()) {
+                delay(300)
+                _isLoading.value = false
+                Log.d(TAG, "Force reset loading state")
+            }
+        }
+    }
+
+    // Keep all your existing CRUD operations unchanged
+    suspend fun assignWorkerToRow(workerId: String, rowNumber: Int): Result<String> {
         if (isCleanedUp.get()) return Result.Error(Exception("ViewModel is cleaned up"))
 
         return operationMutex.withLock {
             _isLoading.value = true
 
             try {
-                val realm = app.getRealmInstance()
-
-                // Find all assignments
-                val assignments = realm.query<Assignment>().find()
-
-                if (assignments.isEmpty()) {
-                    _isLoading.value = false
-                    return@withLock Result.Success(true)
-                }
-
-                // Delete all assignments
-                app.safeWriteTransaction {
-                    val liveAssignments = query<Assignment>().find()
-                    delete(liveAssignments)
-                    Log.d(TAG, "Deleted all assignments (${liveAssignments.size})")
-                }
-
-                Result.Success(true)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error deleting all rows", e)
-                _error.value = "Помилка видалення всіх рядів: ${e.message}"
-                Result.Error(e)
-            } finally {
-                _isLoading.value = false
-            }
-        }
-    }
-
-    private fun syncPendingChanges() {
-        if (isCleanedUp.get()) return
-
-        viewModelScope.launch {
-            try {
-                // Use the global sync manager instead of repository-specific calls
-                Log.d(TAG, "Using global sync manager to sync pending changes")
-                app.syncManager.performSync(silent = true)
-
-                // After sync is complete, explicitly refresh the assignments data
-                refreshAssignmentsData()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error syncing changes", e)
-                _error.value = "Failed to sync changes: ${e.message}"
-            }
-        }
-    }
-
-    fun forceRefreshUI() {
-        if (isCleanedUp.get()) return
-
-        viewModelScope.launch {
-            val currentList = _assignments.value
-            // First set to empty list to force change
-            _assignments.value = emptyList()
-            // Small delay to ensure UI processes the change
-            delay(50)
-            // Then set back to original list
-            _assignments.value = currentList
-            Log.d(TAG, "Forced UI refresh with ${currentList.size} assignment groups")
-        }
-    }
-
-    private fun refreshAssignmentsData() {
-        if (isCleanedUp.get()) return
-
-        viewModelScope.launch {
-            Log.d(TAG, "Refreshing assignments data after sync")
-            _isLoading.value = true
-
-            try {
-                // Force a UI refresh by clearing and then reloading
-                val currentList = _assignments.value.toList()
-                _assignments.value = emptyList() // Clear first
-                delay(50) // Short delay
-
-                // Then reload with fresh data
-                assignmentRepository.getAllGroupedByRow().collect { result ->
-                    if (isCleanedUp.get()) return@collect
-
-                    if (result is Result.Success) {
-                        Log.d(TAG, "Successfully refreshed ${result.data.size} assignment groups")
-                        _assignments.value = result.data
-
-                        // Also check and update UI even if no data actually changed
-                        if (result.data.isEmpty() && currentList.isNotEmpty()) {
-                            _assignments.value = currentList // Restore if no new data
-                        }
-                    }
-                    // We only need one emission, so break the collection
-                    return@collect
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error refreshing assignments data", e)
-            } finally {
-                _isLoading.value = false
-            }
-        }
-    }
-
-    /**
-     * Assign a worker to a row.
-     */
-    suspend fun assignWorkerToRow(workerId: String, rowNumber: Int): Result<Boolean> {
-        if (isCleanedUp.get()) return Result.Error(Exception("ViewModel is cleaned up"))
-
-        return operationMutex.withLock {
-            _isLoading.value = true
-
-            try {
-                // Use repository method instead of direct Realm access
                 val result = assignmentRepository.assignWorkerToRow(workerId, rowNumber)
-
                 when (result) {
                     is Result.Success -> {
-                        Log.d(TAG, "Worker assigned successfully to row: $rowNumber, ID=${result.data}")
-                        Result.Success(true)
+                        Log.d(TAG, "Worker assigned successfully")
+                        Result.Success(result.data)
                     }
                     is Result.Error -> {
                         Log.e(TAG, "Error assigning worker", result.exception)
@@ -437,9 +394,6 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /**
-     * Move a worker to a different row.
-     */
     suspend fun moveWorkerToRow(assignmentId: String, newRowNumber: Int): Result<Boolean> {
         if (isCleanedUp.get()) return Result.Error(Exception("ViewModel is cleaned up"))
 
@@ -447,12 +401,10 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
             _isLoading.value = true
 
             try {
-                // Use repository method instead of direct Realm access
                 val result = assignmentRepository.moveWorkerToRow(assignmentId, newRowNumber)
-
                 when (result) {
                     is Result.Success -> {
-                        Log.d(TAG, "Worker moved to row: $newRowNumber")
+                        Log.d(TAG, "Worker moved successfully")
                         Result.Success(true)
                     }
                     is Result.Error -> {
@@ -472,9 +424,6 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /**
-     * Delete a worker assignment.
-     */
     suspend fun deleteWorkerAssignment(assignmentId: String): Result<Boolean> {
         if (isCleanedUp.get()) return Result.Error(Exception("ViewModel is cleaned up"))
 
@@ -483,10 +432,9 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
 
             try {
                 val result = assignmentRepository.delete(assignmentId)
-
                 when (result) {
                     is Result.Success -> {
-                        Log.d(TAG, "Worker assignment deleted")
+                        Log.d(TAG, "Assignment deleted successfully")
                         Result.Success(true)
                     }
                     is Result.Error -> {
@@ -506,9 +454,6 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /**
-     * Delete an entire row.
-     */
     suspend fun deleteEntireRow(rowNumber: Int): Result<Boolean> {
         if (isCleanedUp.get()) return Result.Error(Exception("ViewModel is cleaned up"))
 
@@ -516,12 +461,10 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
             _isLoading.value = true
 
             try {
-                // Use repository method instead of direct Realm access
                 val result = assignmentRepository.completelyDeleteRow(rowNumber)
-
                 when (result) {
                     is Result.Success -> {
-                        Log.d(TAG, "Row deleted: $rowNumber")
+                        Log.d(TAG, "Row deleted successfully")
                         Result.Success(true)
                     }
                     is Result.Error -> {
@@ -541,16 +484,11 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /**
-     * Check if a worker is already assigned to a row.
-     */
     suspend fun checkWorkerAssignment(workerId: String): Result<Int> {
         if (isCleanedUp.get()) return Result.Error(Exception("ViewModel is cleaned up"))
 
         return try {
-            // Use repository method instead of direct Realm access
             val result = assignmentRepository.getWorkerAssignment(workerId)
-
             when (result) {
                 is Result.Success -> {
                     val assignment = result.data
@@ -568,9 +506,38 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /**
-     * Clear any error message.
-     */
+    suspend fun deleteAllRows(): Result<Boolean> {
+        if (isCleanedUp.get()) return Result.Error(Exception("ViewModel is cleaned up"))
+
+        return operationMutex.withLock {
+            _isLoading.value = true
+
+            try {
+                val realm = app.getRealmInstance()
+                val assignments = realm.query<Assignment>().find()
+
+                if (assignments.isEmpty()) {
+                    _isLoading.value = false
+                    return@withLock Result.Success(true)
+                }
+
+                app.safeWriteTransaction {
+                    val liveAssignments = query<Assignment>().find()
+                    delete(liveAssignments)
+                    Log.d(TAG, "Deleted all assignments")
+                }
+
+                Result.Success(true)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error deleting all rows", e)
+                _error.value = "Помилка видалення всіх рядів: ${e.message}"
+                Result.Error(e)
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
     fun clearError() {
         _error.value = null
     }
@@ -579,6 +546,5 @@ class AssignRowsViewModel(application: Application) : AndroidViewModel(applicati
         super.onCleared()
         isCleanedUp.set(true)
         Log.d(TAG, "ViewModel cleared")
-        // No need to close Realm here as it's managed by the repository
     }
 }

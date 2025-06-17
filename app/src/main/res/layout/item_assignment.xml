@@ -5,30 +5,89 @@
     android:layout_height="wrap_content"
     android:layout_marginHorizontal="2dp"
     android:layout_marginVertical="1dp"
-    app:cardCornerRadius="2dp"
+    app:cardCornerRadius="4dp"
     app:cardElevation="1dp">
 
     <LinearLayout
         android:id="@+id/assignmentContainer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="6dp">
+        android:orientation="horizontal"
+        android:padding="4dp"
+        android:minHeight="36dp">
 
-        <TextView
-            android:id="@+id/rowNumberTextView"
-            android:layout_width="match_parent"
+        <!-- Left side: Row Number Section -->
+        <LinearLayout
+            android:id="@+id/rowNumberSection"
+            android:layout_width="50dp"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:padding="4dp"
+            android:layout_marginEnd="6dp">
+
+            <TextView
+                android:id="@+id/rowNumberTextView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Ряд 123"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="?attr/colorPrimary"
+                android:gravity="center" />
+
+            <ImageView
+                android:id="@+id/syncStatusIcon"
+                android:layout_width="12dp"
+                android:layout_height="12dp"
+                android:layout_marginTop="2dp"
+                android:src="@drawable/ic_sync_small"
+                android:visibility="gone"
+                android:contentDescription="Sync status"
+                app:tint="?attr/colorSecondary" />
+
+        </LinearLayout>
+
+        <!-- Vertical divider -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="match_parent"
+            android:background="?attr/colorSecondary"
+            android:alpha="0.3"
+            android:layout_marginEnd="6dp" />
+
+        <!-- Right side: Workers Section -->
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:textSize="12sp"
-            android:textStyle="bold" />
+            android:layout_weight="1"
+            android:orientation="vertical">
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/workerRecyclerView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:nestedScrollingEnabled="false" />
+            <!-- Workers RecyclerView -->
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/workerRecyclerView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false" />
 
+            <!-- Empty state for no workers -->
+            <TextView
+                android:id="@+id/emptyWorkersTextView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Немає працівників"
+                android:textSize="11sp"
+                android:textColor="?attr/colorSecondary"
+                android:alpha="0.7"
+                android:textStyle="italic"
+                android:gravity="center"
+                android:padding="4dp"
+                android:visibility="gone" />
+
+        </LinearLayout>
+
+        <!-- Hidden remove button (keeping for compatibility) -->
         <Button
             android:id="@+id/removeRowButton"
             style="@style/Widget.MaterialComponents.Button.TextButton"
@@ -40,5 +99,7 @@
             android:textColor="#F44336"
             android:textSize="10sp"
             android:visibility="gone" />
+
     </LinearLayout>
+
 </androidx.cardview.widget.CardView>

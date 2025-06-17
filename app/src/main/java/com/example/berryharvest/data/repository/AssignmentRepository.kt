@@ -11,7 +11,7 @@ interface AssignmentRepository : BaseRepository<Assignment> {
     /**
      * Get all assignments grouped by row.
      */
-    fun getAllGroupedByRow(): Flow<Result<List<AssignmentGroup>>>
+    suspend fun getAllGroupedByRow(): Flow<Result<List<AssignmentGroup>>>
 
     /**
      * Delete all assignments for a specific row.

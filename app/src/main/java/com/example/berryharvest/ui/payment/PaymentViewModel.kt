@@ -1,4 +1,3 @@
-// app/src/main/java/com/example/berryharvest/ui/payment/PaymentViewModel.kt
 package com.example.berryharvest.ui.payment
 
 import android.app.Application
@@ -11,19 +10,38 @@ import com.example.berryharvest.data.model.PaymentRecord
 import com.example.berryharvest.data.model.Worker
 import com.example.berryharvest.data.repository.ConnectionState
 import com.example.berryharvest.data.repository.Result
+import io.realm.kotlin.ext.query
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 class PaymentViewModel(application: Application) : AndroidViewModel(application) {
+    private val TAG = "PaymentViewModel"
     private val app: BerryHarvestApplication = getApplication() as BerryHarvestApplication
     private val paymentRepository = app.repositoryProvider.paymentRepository
     private val workerRepository = app.repositoryProvider.workerRepository
     private val settingsRepository = app.repositoryProvider.settingsRepository
     private val networkStatusManager = app.networkStatusManager
+
+    // Mutex for thread-safe operations
+    private val operationMutex = Mutex()
+    private val dataLoadMutex = Mutex()
+
+    // Atomic flags for state management
+    private val isInitialized = AtomicBoolean(false)
+    private val isCleanedUp = AtomicBoolean(false)
+    private val isLoadingWorkerData = AtomicBoolean(false)
 
     // Worker data
     private val _selectedWorker = MutableStateFlow<Worker?>(null)
@@ -63,201 +81,310 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
     private val _punnetPrice = MutableStateFlow(0.0f)
     val punnetPrice: StateFlow<Float> = _punnetPrice.asStateFlow()
 
+    // Data initialization state
+    private val _dataInitialized = MutableStateFlow(false)
+    val dataInitialized: StateFlow<Boolean> = _dataInitialized.asStateFlow()
+
     init {
-        loadAllWorkers()
-        observeConnectionState()
-        loadPunnetPrice()
+        initializeViewModel()
     }
 
-    private fun loadPunnetPrice() {
+    private fun initializeViewModel() {
+        viewModelScope.launch {
+            if (isInitialized.getAndSet(true)) {
+                Log.d(TAG, "ViewModel already initialized, skipping")
+                return@launch
+            }
+
+            try {
+                // Load initial data synchronously
+                loadInitialDataSynchronously()
+
+                // Set up observers
+                setupObservers()
+
+                // Handle sync after initialization
+                handleInitialSync()
+
+            } catch (e: Exception) {
+                isInitialized.set(false) // Reset on error
+                Log.e(TAG, "Error initializing ViewModel", e)
+                _error.value = "Помилка ініціалізації: ${e.message}"
+            }
+        }
+    }
+
+    private suspend fun loadInitialDataSynchronously() {
+        if (isCleanedUp.get()) return
+
+        try {
+            _isLoading.value = true
+
+            // Load workers and settings synchronously
+            val workersDeferred = viewModelScope.async { loadWorkersSync() }
+            val priceDeferred = viewModelScope.async { loadPunnetPriceSync() }
+
+            // Wait for both to complete
+            awaitAll(workersDeferred, priceDeferred)
+
+            _dataInitialized.value = true
+            Log.d(TAG, "Initial data loaded successfully")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading initial data", e)
+            _error.value = "Помилка завантаження даних: ${e.message}"
+        } finally {
+            _isLoading.value = false
+        }
+    }
+
+    private suspend fun loadWorkersSync(): List<Worker> {
+        return try {
+            val realm = app.getRealmInstance()
+            val workers = realm.query<Worker>().find().toList()
+            _allWorkers.value = workers
+            Log.d(TAG, "Loaded ${workers.size} workers synchronously")
+            workers
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading workers sync", e)
+            emptyList()
+        }
+    }
+
+    private suspend fun loadPunnetPriceSync(): Float {
+        return try {
+            val price = settingsRepository.getPunnetPrice()
+            _punnetPrice.value = price
+            Log.d(TAG, "Loaded punnet price: $price")
+            price
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading punnet price sync", e)
+            0.0f
+        }
+    }
+
+    private fun setupObservers() {
+        if (isCleanedUp.get()) return
+
+        // Observe workers with live updates
+        observeWorkers()
+
+        // Observe connection state
+        observeConnectionState()
+    }
+
+    private fun observeWorkers() {
         viewModelScope.launch {
             try {
-                val price = settingsRepository.getPunnetPrice()
-                _punnetPrice.value = price
+                workerRepository.getAll()
+                    .distinctUntilChanged()
+                    .collect { result ->
+                        if (isCleanedUp.get()) return@collect
+
+                        when (result) {
+                            is Result.Success -> {
+                                if (result.data != _allWorkers.value) {
+                                    _allWorkers.value = result.data
+                                    Log.d(TAG, "Workers updated: ${result.data.size}")
+                                }
+                            }
+                            is Result.Error -> {
+                                Log.e(TAG, "Error observing workers", result.exception)
+                                if (!_dataInitialized.value) {
+                                    _error.value = "Failed to load workers: ${result.message}"
+                                }
+                            }
+                            is Result.Loading -> {
+                                if (!_dataInitialized.value) {
+                                    _isLoading.value = true
+                                }
+                            }
+                        }
+                    }
             } catch (e: Exception) {
-                Log.e("PaymentViewModel", "Error loading punnet price", e)
-                _error.value = "Failed to load punnet price: ${e.message}"
+                Log.e(TAG, "Error setting up worker observer", e)
             }
         }
     }
 
     private fun observeConnectionState() {
         viewModelScope.launch {
-            networkStatusManager.connectionState.collect { state ->
-                _connectionState.value = state
+            try {
+                networkStatusManager.connectionState.collect { state ->
+                    if (isCleanedUp.get()) return@collect
 
-                // If back online, try to sync
-                if (state is ConnectionState.Connected && paymentRepository.hasPendingOperations()) {
-                    syncPendingChanges()
+                    _connectionState.value = state
+
+                    if (state is ConnectionState.Connected && paymentRepository.hasPendingOperations()) {
+                        scheduleDelayedSync()
+                    }
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error observing connection state", e)
             }
+        }
+    }
+
+    private fun handleInitialSync() {
+        viewModelScope.launch {
+            if (networkStatusManager.connectionState.value is ConnectionState.Connected) {
+                scheduleDelayedSync()
+            }
+        }
+    }
+
+    private fun scheduleDelayedSync() {
+        viewModelScope.launch {
+            // Delay to avoid interfering with UI loading
+            kotlinx.coroutines.delay(2000)
+            syncPendingChanges()
         }
     }
 
     private fun syncPendingChanges() {
         viewModelScope.launch {
             try {
-                // Use the global sync manager
                 app.syncManager.performSync(silent = true)
             } catch (e: Exception) {
-                Log.e("PaymentViewModel", "Error syncing changes", e)
-            }
-        }
-    }
-
-    private fun loadAllWorkers() {
-        viewModelScope.launch {
-            _isLoading.value = true
-            workerRepository.getAll().collect { result ->
-                _isLoading.value = false
-                when (result) {
-                    is Result.Success -> {
-                        _allWorkers.value = result.data
-                    }
-                    is Result.Error -> {
-                        _error.value = "Failed to load workers: ${result.message}"
-                        Log.e("PaymentViewModel", "Error loading workers", result.exception)
-                    }
-                    is Result.Loading -> {
-                        _isLoading.value = true
-                    }
-                }
+                Log.e(TAG, "Error syncing changes", e)
             }
         }
     }
 
     fun selectWorker(worker: Worker) {
-        _selectedWorker.value = worker
-
-        // Load data for this worker
-        loadWorkerBalance(worker._id)
-        loadWorkerEarnings(worker._id)
-        loadTodayPunnetCount(worker._id)
-        loadPaymentHistory(worker._id)
-    }
-
-    private fun loadWorkerBalance(workerId: String) {
         viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = paymentRepository.getWorkerBalance(workerId)
-                _isLoading.value = false
-
-                when (result) {
-                    is Result.Success -> {
-                        _workerBalance.value = result.data
-                    }
-                    is Result.Error -> {
-                        // Check if it's a subscription error
-                        if (result.message.contains("NO_SUBSCRIPTION_FOR_WRITE") ||
-                            result.message.contains("subscription")) {
-                            // Try to ensure subscriptions
-                            app.ensureSubscriptions()
-
-                            // Still show the error but with a more helpful message
-                            _error.value = "Subscription issue detected. Please try again in a moment."
-                        } else {
-                            _error.value = "Failed to load worker balance: ${result.message}"
-                        }
-
-                        Log.e("PaymentViewModel", "Error loading worker balance", result.exception)
-                    }
-                    is Result.Loading -> {
-                        // Already handling loading state
-                    }
-                }
-            } catch (e: Exception) {
-                _isLoading.value = false
-
-                // Check if it's a subscription error
-                if (e.message?.contains("NO_SUBSCRIPTION_FOR_WRITE") == true ||
-                    e.message?.contains("subscription") == true) {
-                    // Try to ensure subscriptions
-                    app.ensureSubscriptions()
-
-                    // Show a more helpful error message
-                    _error.value = "Subscription issue detected. Please try again in a moment."
-                } else {
-                    _error.value = "Error loading worker balance: ${e.message}"
+            dataLoadMutex.withLock {
+                if (isLoadingWorkerData.getAndSet(true)) {
+                    Log.d(TAG, "Worker data loading already in progress")
+                    return@withLock
                 }
 
-                Log.e("PaymentViewModel", "Error loading worker balance", e)
+                try {
+                    _selectedWorker.value = worker
+                    _isLoading.value = true
+
+                    // Load all worker data concurrently but safely
+                    loadWorkerDataConcurrently(worker._id)
+
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error selecting worker", e)
+                    _error.value = "Помилка завантаження даних працівника: ${e.message}"
+                } finally {
+                    _isLoading.value = false
+                    isLoadingWorkerData.set(false)
+                }
             }
         }
     }
 
-    private fun loadWorkerEarnings(workerId: String) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = paymentRepository.getWorkerEarnings(workerId)
-                _isLoading.value = false
+    private suspend fun loadWorkerDataConcurrently(workerId: String) {
+        try {
+            // Launch all operations concurrently but wait for all to complete
+            val balanceDeferred = viewModelScope.async { loadWorkerBalanceSafe(workerId) }
+            val earningsDeferred = viewModelScope.async { loadWorkerEarningsSafe(workerId) }
+            val punnetsDeferred = viewModelScope.async { loadTodayPunnetCountSafe(workerId) }
+            val historyDeferred = viewModelScope.async { loadPaymentHistorySafe(workerId) }
 
-                when (result) {
-                    is Result.Success -> {
-                        _workerEarnings.value = result.data
-                    }
-                    is Result.Error -> {
-                        _error.value = "Failed to load worker earnings: ${result.message}"
-                        Log.e("PaymentViewModel", "Error loading worker earnings", result.exception)
-                    }
-                    is Result.Loading -> {
-                        // Already handling loading state
-                    }
-                }
-            } catch (e: Exception) {
-                _isLoading.value = false
-                _error.value = "Error loading worker earnings: ${e.message}"
-                Log.e("PaymentViewModel", "Error loading worker earnings", e)
-            }
+            // Wait for all operations to complete
+            val results = awaitAll(balanceDeferred, earningsDeferred, punnetsDeferred, historyDeferred)
+
+            // Update UI with results
+            _workerBalance.value = results[0] as Float
+            _workerEarnings.value = results[1] as Float
+            _todayPunnetCount.value = results[2] as Int
+            _paymentHistory.value = results[3] as List<PaymentRecord>
+
+            Log.d(TAG, "Worker data loaded successfully")
+
+            // Check for balance discrepancies after all data is loaded
+            checkBalanceDiscrepancy()
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading worker data concurrently", e)
+            _error.value = "Помилка завантаження даних працівника: ${e.message}"
         }
     }
 
-    private fun loadTodayPunnetCount(workerId: String) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = paymentRepository.getTodayPunnetCount(workerId)
-                _isLoading.value = false
-
-                when (result) {
-                    is Result.Success -> {
-                        _todayPunnetCount.value = result.data
-                    }
-                    is Result.Error -> {
-                        _error.value = "Failed to load today's punnet count: ${result.message}"
-                        Log.e("PaymentViewModel", "Error loading today's punnet count", result.exception)
-                    }
-                    is Result.Loading -> {
-                        // Already handling loading state
-                    }
+    private suspend fun loadWorkerBalanceSafe(workerId: String): Float {
+        return try {
+            when (val result = paymentRepository.getWorkerBalance(workerId)) {
+                is Result.Success -> result.data
+                is Result.Error -> {
+                    handleSubscriptionError(result)
+                    0.0f
                 }
-            } catch (e: Exception) {
-                _isLoading.value = false
-                _error.value = "Error loading today's punnet count: ${e.message}"
-                Log.e("PaymentViewModel", "Error loading today's punnet count", e)
+                is Result.Loading -> 0.0f
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading worker balance", e)
+            handleSubscriptionError(e)
+            0.0f
         }
     }
 
-    private fun loadPaymentHistory(workerId: String) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            paymentRepository.getPaymentRecordsForWorker(workerId).collect { result ->
-                _isLoading.value = false
-
-                when (result) {
-                    is Result.Success -> {
-                        _paymentHistory.value = result.data
-                    }
-                    is Result.Error -> {
-                        _error.value = "Failed to load payment history: ${result.message}"
-                        Log.e("PaymentViewModel", "Error loading payment history", result.exception)
-                    }
-                    is Result.Loading -> {
-                        _isLoading.value = true
-                    }
+    private suspend fun loadWorkerEarningsSafe(workerId: String): Float {
+        return try {
+            when (val result = paymentRepository.getWorkerEarnings(workerId)) {
+                is Result.Success -> result.data
+                is Result.Error -> {
+                    Log.e(TAG, "Error loading worker earnings", result.exception)
+                    0.0f
                 }
+                is Result.Loading -> 0.0f
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading worker earnings", e)
+            0.0f
+        }
+    }
+
+    private suspend fun loadTodayPunnetCountSafe(workerId: String): Int {
+        return try {
+            when (val result = paymentRepository.getTodayPunnetCount(workerId)) {
+                is Result.Success -> result.data
+                is Result.Error -> {
+                    Log.e(TAG, "Error loading today's punnet count", result.exception)
+                    0
+                }
+                is Result.Loading -> 0
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading today's punnet count", e)
+            0
+        }
+    }
+
+    private suspend fun loadPaymentHistorySafe(workerId: String): List<PaymentRecord> {
+        return try {
+            // Use first() to get a single emission instead of collect
+            when (val result = paymentRepository.getPaymentRecordsForWorker(workerId).distinctUntilChanged().take(1).first()) {
+                is Result.Success -> result.data
+                is Result.Error -> {
+                    Log.e(TAG, "Error loading payment history", result.exception)
+                    emptyList()
+                }
+                is Result.Loading -> emptyList()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading payment history", e)
+            emptyList()
+        }
+    }
+
+    private suspend fun handleSubscriptionError(error: Any) {
+        val message = when (error) {
+            is Result.Error -> error.message ?: "Unknown error"
+            is Exception -> error.message ?: "Unknown exception"
+            else -> error.toString()
+        }
+
+        if (message.contains("NO_SUBSCRIPTION_FOR_WRITE") || message.contains("subscription")) {
+            try {
+                app.ensureSubscriptions()
+                _error.value = "Виявлено проблему з підпискою. Спробуйте ще раз через мить."
+            } catch (e: Exception) {
+                Log.e(TAG, "Error ensuring subscriptions", e)
+                _error.value = "Помилка з підпискою: ${e.message}"
             }
         }
     }
@@ -279,21 +406,16 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
 
                 // If there's a significant difference (more than 0.01)
                 if (Math.abs(expectedBalance - balance) > 0.01f) {
-                    // Log the discrepancy
-                    Log.w("PaymentViewModel", "Balance discrepancy detected: stored=$balance, calculated=$expectedBalance")
-
-                    // Show a message to the user
+                    Log.w(TAG, "Balance discrepancy detected: stored=$balance, calculated=$expectedBalance")
                     _error.value = "Виявлено розбіжність у балансі. Спроба виправлення..."
 
-                    // Try to fix by recalculating from scratch
-                    val result = paymentRepository.getWorkerBalance(worker._id)
-                    if (result is Result.Success) {
-                        _workerBalance.value = result.data
-                        _success.value = "Баланс оновлено"
-                    }
+                    // Try to fix by recalculating
+                    val newBalance = loadWorkerBalanceSafe(worker._id)
+                    _workerBalance.value = newBalance
+                    _success.value = "Баланс оновлено"
                 }
             } catch (e: Exception) {
-                Log.e("PaymentViewModel", "Error checking balance discrepancy", e)
+                Log.e(TAG, "Error checking balance discrepancy", e)
             }
         }
     }
@@ -329,32 +451,47 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
 
     private fun makePayment(workerId: String, amount: Float, notes: String) {
         viewModelScope.launch {
-            _isLoading.value = true
-            try {
-                val result = paymentRepository.recordPayment(workerId, amount, notes)
-                _isLoading.value = false
+            operationMutex.withLock {
+                _isLoading.value = true
+                try {
+                    val result = paymentRepository.recordPayment(workerId, amount, notes)
 
-                when (result) {
-                    is Result.Success -> {
-                        _success.value = "Payment recorded successfully"
-
-                        // Refresh data
-                        loadWorkerBalance(workerId)
-                        loadPaymentHistory(workerId)
+                    when (result) {
+                        is Result.Success -> {
+                            _success.value = "Payment recorded successfully"
+                            // Refresh worker data
+                            refreshWorkerData(workerId)
+                        }
+                        is Result.Error -> {
+                            _error.value = "Failed to record payment: ${result.message}"
+                            Log.e(TAG, "Error recording payment", result.exception)
+                        }
+                        is Result.Loading -> {
+                            // Loading handled by progress bar
+                        }
                     }
-                    is Result.Error -> {
-                        _error.value = "Failed to record payment: ${result.message}"
-                        Log.e("PaymentViewModel", "Error recording payment", result.exception)
-                    }
-                    is Result.Loading -> {
-                        // Already handling loading state
-                    }
+                } catch (e: Exception) {
+                    _error.value = "Error recording payment: ${e.message}"
+                    Log.e(TAG, "Error recording payment", e)
+                } finally {
+                    _isLoading.value = false
                 }
-            } catch (e: Exception) {
-                _isLoading.value = false
-                _error.value = "Error recording payment: ${e.message}"
-                Log.e("PaymentViewModel", "Error recording payment", e)
             }
+        }
+    }
+
+    private suspend fun refreshWorkerData(workerId: String) {
+        try {
+            // Reload only the data that changed
+            val newBalance = loadWorkerBalanceSafe(workerId)
+            val newHistory = loadPaymentHistorySafe(workerId)
+
+            _workerBalance.value = newBalance
+            _paymentHistory.value = newHistory
+
+            Log.d(TAG, "Worker data refreshed after payment")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error refreshing worker data", e)
         }
     }
 
@@ -377,5 +514,20 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
         _workerEarnings.value = 0.0f
         _todayPunnetCount.value = 0
         _paymentHistory.value = emptyList()
+        isLoadingWorkerData.set(false)
+    }
+
+    fun ensureDataLoaded() {
+        if (!_dataInitialized.value && !isCleanedUp.get()) {
+            viewModelScope.launch {
+                loadInitialDataSynchronously()
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        isCleanedUp.set(true)
+        Log.d(TAG, "ViewModel cleared")
     }
 }

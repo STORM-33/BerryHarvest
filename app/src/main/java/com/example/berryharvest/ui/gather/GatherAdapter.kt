@@ -87,9 +87,3 @@ class GatherAdapter(
         }
     }
 }
-
-data class GatherWithDetails(
-    val gather: Gather,
-    val workerName: String,
-    val dateTime: String? = null
-)

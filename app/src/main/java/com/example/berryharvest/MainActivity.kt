@@ -13,6 +13,7 @@ import android.view.View
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.lifecycleScope
@@ -55,6 +56,9 @@ class MainActivity : AppCompatActivity() {
     private val REQUEST_STORAGE_PERMISSION = 101
     private val BADGE_FOLDER = "BerryHarvest_Badges"
 
+    // Enhanced back press handling
+    private lateinit var backPressedCallback: OnBackPressedCallback
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -78,6 +82,9 @@ class MainActivity : AppCompatActivity() {
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
 
+        // Setup enhanced back press handling
+        setupBackPressHandling(drawerLayout)
+
         initializeRealm()
 
         lifecycleScope.launch(Dispatchers.IO) {
@@ -88,6 +95,58 @@ class MainActivity : AppCompatActivity() {
         setupNetworkSynchronization()
     }
 
+    private fun setupBackPressHandling(drawerLayout: DrawerLayout) {
+        backPressedCallback = object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when {
+                    // If drawer is open, close it
+                    drawerLayout.isDrawerOpen(binding.navView) -> {
+                        drawerLayout.closeDrawer(binding.navView)
+                    }
+                    // If we're not on the start destination, navigate up
+                    !isStartDestination() -> {
+                        if (!findNavController(R.id.nav_host_fragment_content_main).navigateUp()) {
+                            // If navigation up fails, finish the activity
+                            finishWithTransition()
+                        }
+                    }
+                    // Otherwise, show exit confirmation
+                    else -> {
+                        showExitConfirmation()
+                    }
+                }
+            }
+        }
+        onBackPressedDispatcher.addCallback(this, backPressedCallback)
+    }
+
+    private fun isStartDestination(): Boolean {
+        val navController = findNavController(R.id.nav_host_fragment_content_main)
+        return navController.currentDestination?.id == R.id.nav_scanqr
+    }
+
+    private fun showExitConfirmation() {
+        AlertDialog.Builder(this)
+            .setTitle("Вихід з додатку")
+            .setMessage("Ви впевнені, що хочете вийти з додатку?")
+            .setPositiveButton("Так") { _, _ ->
+                finishWithTransition()
+            }
+            .setNegativeButton("Ні", null)
+            .show()
+    }
+
+    private fun finishWithTransition() {
+        finish()
+        // Add smooth exit transition
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE,
+                android.R.anim.fade_in, android.R.anim.fade_out)
+        } else {
+            @Suppress("DEPRECATION")
+            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+        }
+    }
 
     private fun setupNetworkStatusIndicator() {
         val networkStatusManager = (application as BerryHarvestApplication).networkStatusManager
@@ -172,6 +231,7 @@ class MainActivity : AppCompatActivity() {
                             // Try to initialize with offline mode
                             initializeOfflineRealm()
                         }
+                        .setCancelable(false)
                         .show()
                 }
             }
@@ -242,7 +302,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showProgressDialog(message: String) {
-        if (progressDialog == null) {
+        try {
+            if (progressDialog?.isShowing == true) {
+                progressDialog?.dismiss()
+            }
+
             val dialogView = layoutInflater.inflate(R.layout.dialog_progress, null)
             val messageTextView = dialogView.findViewById<TextView>(R.id.progressMessageTextView)
             messageTextView.text = message
@@ -251,13 +315,20 @@ class MainActivity : AppCompatActivity() {
                 .setView(dialogView)
                 .setCancelable(false)
                 .create()
-        }
 
-        progressDialog?.show()
+            progressDialog?.show()
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error showing progress dialog", e)
+        }
     }
 
     private fun hideProgressDialog() {
-        progressDialog?.dismiss()
+        try {
+            progressDialog?.dismiss()
+            progressDialog = null
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error hiding progress dialog", e)
+        }
     }
 
     private fun initializeOfflineRealm() {
@@ -291,7 +362,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showError(message: String) {
-        Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG).show()
+        if (!isFinishing && !isDestroyed) {
+            Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG).show()
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -428,7 +501,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
     private fun showPunnetPriceUpdateDialog() {
         val dialogView = layoutInflater.inflate(R.layout.dialog_edit_price, null)
         val priceEditText = dialogView.findViewById<EditText>(R.id.priceEditText)
@@ -483,11 +555,24 @@ class MainActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     try {
                         val settingsRepository = (application as BerryHarvestApplication).repositoryProvider.settingsRepository
-                        settingsRepository.updatePunnetPrice(newPrice)
+                        val result = settingsRepository.updatePunnetPrice(newPrice)
 
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@MainActivity, "Ціну оновлено", Toast.LENGTH_SHORT).show()
-                            showWorkdaySuccessDialog()
+                        when (result) {
+                            is com.example.berryharvest.data.repository.Result.Success -> {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(this@MainActivity, "Ціну оновлено", Toast.LENGTH_SHORT).show()
+                                    showWorkdaySuccessDialog()
+                                }
+                            }
+                            is com.example.berryharvest.data.repository.Result.Error -> {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(this@MainActivity, "Помилка оновлення ціни: ${result.message}", Toast.LENGTH_SHORT).show()
+                                    showWorkdaySuccessDialog()
+                                }
+                            }
+                            is com.example.berryharvest.data.repository.Result.Loading -> {
+                                // Handle loading state if needed
+                            }
                         }
                     } catch (e: Exception) {
                         withContext(Dispatchers.Main) {
@@ -573,7 +658,7 @@ class MainActivity : AppCompatActivity() {
     private fun generateWorkerBadges() {
         // Show progress dialog
         val progressDialog = AlertDialog.Builder(this)
-            .setTitle("Генерація бейджів")
+            .setTitle("Генрація бейджів")
             .setMessage("Створення PDF файлу з бейджами...")
             .setCancelable(false)
             .create()
@@ -710,7 +795,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -734,9 +818,38 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        syncSnackbar?.dismiss()
-        syncSnackbar = null
+        try {
+            syncSnackbar?.dismiss()
+            syncSnackbar = null
+            progressDialog?.dismiss()
+            progressDialog = null
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error during cleanup", e)
+        }
         super.onDestroy()
     }
-}
 
+    override fun onLowMemory() {
+        super.onLowMemory()
+        // Force garbage collection on low memory
+        System.gc()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // Handle different memory pressure levels
+        when (level) {
+            TRIM_MEMORY_RUNNING_MODERATE,
+            TRIM_MEMORY_RUNNING_LOW,
+            TRIM_MEMORY_RUNNING_CRITICAL -> {
+                // App is running but system is low on memory
+                System.gc()
+            }
+            TRIM_MEMORY_UI_HIDDEN -> {
+                // UI is hidden, good time to free resources
+                syncSnackbar?.dismiss()
+                syncSnackbar = null
+            }
+        }
+    }
+}

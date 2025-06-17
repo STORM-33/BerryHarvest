@@ -1,18 +1,25 @@
 package com.example.berryharvest.ui.payment
 
 import android.app.AlertDialog
+import android.content.ContentValues.TAG
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.berryharvest.BaseFragment
@@ -21,8 +28,6 @@ import com.example.berryharvest.data.model.Worker
 import com.example.berryharvest.ui.common.SearchableSpinnerView
 import com.example.berryharvest.ui.common.WorkerSearchableItem
 import com.example.berryharvest.ui.common.toSearchableItem
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.util.Locale
 
 class PaymentFragment : BaseFragment() {
@@ -41,7 +46,7 @@ class PaymentFragment : BaseFragment() {
     private lateinit var partialPaymentButton: Button
     private lateinit var paymentHistoryRecyclerView: RecyclerView
     private lateinit var loadingProgressBar: ProgressBar
-    private lateinit var emptyStateTextView: TextView
+    private lateinit var emptyStateLayout: LinearLayout
 
     private lateinit var paymentAdapter: PaymentAdapter
 
@@ -67,23 +72,30 @@ class PaymentFragment : BaseFragment() {
         partialPaymentButton = root.findViewById(R.id.partialPaymentButton)
         paymentHistoryRecyclerView = root.findViewById(R.id.paymentHistoryRecyclerView)
         loadingProgressBar = root.findViewById(R.id.loadingProgressBar)
-        emptyStateTextView = root.findViewById(R.id.emptyStateTextView)
+        emptyStateLayout = root.findViewById(R.id.emptyStateTextView)
 
         // Set up RecyclerView
         paymentAdapter = PaymentAdapter()
         paymentHistoryRecyclerView.adapter = paymentAdapter
         paymentHistoryRecyclerView.layoutManager = LinearLayoutManager(context)
 
-        // Set up worker search
-        setupWorkerSearch()
-
         // Set up button listeners
         setupButtonListeners()
 
-        // Set up observers
+        return root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        // Setup observers with proper lifecycle awareness
         setupObservers()
 
-        return root
+        // Setup worker search after observers
+        setupWorkerSearch()
+
+        // Ensure data is loaded
+        viewModel.ensureDataLoaded()
     }
 
     override fun onPause() {
@@ -93,20 +105,21 @@ class PaymentFragment : BaseFragment() {
 
     override fun onResume() {
         super.onResume()
-        // Reset the searchable spinner completely
         workerSearchView.clearSelection()
         viewModel.clearSelection()
     }
 
     private fun setupWorkerSearch() {
         viewLifecycleOwner.lifecycleScope.launch {
-            // Observe all workers for search
-            viewModel.allWorkers.collect { workers ->
-                if (workers.isNotEmpty()) {
-                    workerSearchView.setAdapter(workers.map { it.toSearchableItem() })
-                    workerSearchView.setOnItemSelectedListener { searchableItem ->
-                        val workerItem = searchableItem as WorkerSearchableItem
-                        viewModel.selectWorker(workerItem.worker)
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.allWorkers.collect { workers ->
+                    if (workers.isNotEmpty()) {
+                        workerSearchView.setAdapter(workers.map { it.toSearchableItem() })
+                        workerSearchView.setOnItemSelectedListener { searchableItem ->
+                            val workerItem = searchableItem as WorkerSearchableItem
+                            viewModel.selectWorker(workerItem.worker)
+                        }
+                        Log.d(TAG, "Worker search setup with ${workers.size} workers")
                     }
                 }
             }
@@ -125,70 +138,101 @@ class PaymentFragment : BaseFragment() {
 
     private fun setupObservers() {
         // Observe selected worker
-        launchWhenStarted("worker") {
-            viewModel.selectedWorker.collect { worker ->
-                worker?.let {
-                    showWorkerSummary(it)
-                    // Delay slightly to allow all data to load
-                    delay(500)
-                    // Check for balance discrepancies
-                    viewModel.checkBalanceDiscrepancy()
-                } ?: hideWorkerSummary()
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.selectedWorker.collect { worker ->
+                    Log.d(TAG, "Selected worker: ${worker?.fullName ?: "none"}")
+                    worker?.let {
+                        showWorkerSummary(it)
+                    } ?: hideWorkerSummary()
+                }
             }
         }
 
         // Observe earnings
-        launchWhenStarted("earnings") {
-            viewModel.workerEarnings.collect { earnings ->
-                updateEarningsDisplay(earnings)
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.workerEarnings.collect { earnings ->
+                    Log.d(TAG, "Worker earnings updated: $earnings")
+                    updateEarningsDisplay(earnings)
+                }
             }
         }
 
         // Observe balance
-        launchWhenStarted("balance") {
-            viewModel.workerBalance.collect { balance ->
-                updateBalanceDisplay(balance)
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.workerBalance.collect { balance ->
+                    Log.d(TAG, "Worker balance updated: $balance")
+                    updateBalanceDisplay(balance)
+                }
             }
         }
 
         // Observe today's punnet count
-        launchWhenStarted("punnet-count") {
-            viewModel.todayPunnetCount.collect { count ->
-                todayPunnetsTextView.text = count.toString()
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.todayPunnetCount.collect { count ->
+                    Log.d(TAG, "Today's punnet count: $count")
+                    todayPunnetsTextView.text = count.toString()
+                }
             }
         }
 
         // Observe payment history
-        launchWhenStarted("payment-history") {
-            viewModel.paymentHistory.collect { payments ->
-                paymentAdapter.submitList(payments)
-                updatePaymentHistoryDisplay(payments)
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.paymentHistory.collect { payments ->
+                    Log.d(TAG, "Payment history updated: ${payments.size} payments")
+                    paymentAdapter.submitList(payments)
+                    updatePaymentHistoryDisplay(payments)
+                }
             }
         }
 
         // Observe loading state
-        launchWhenStarted("loading-state") {
-            viewModel.isLoading.collect { isLoading ->
-                loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.isLoading.collect { isLoading ->
+                    Log.d(TAG, "Loading state: $isLoading")
+                    loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
+                }
+            }
+        }
+
+        // Observe data initialization
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.dataInitialized.collect { initialized ->
+                    if (initialized) {
+                        loadingProgressBar.visibility = View.GONE
+                    }
+                }
             }
         }
 
         // Observe errors
-        launchWhenStarted("error-flow") {
-            viewModel.error.collect { errorMessage ->
-                errorMessage?.let {
-                    Toast.makeText(context, it, Toast.LENGTH_LONG).show()
-                    viewModel.clearError()
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.error.collect { errorMessage ->
+                    errorMessage?.let {
+                        Log.e(TAG, "Error: $it")
+                        Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+                        viewModel.clearError()
+                    }
                 }
             }
         }
 
         // Observe success messages
-        launchWhenStarted("success-flow") {
-            viewModel.success.collect { successMessage ->
-                successMessage?.let {
-                    Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
-                    viewModel.clearSuccess()
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.success.collect { successMessage ->
+                    successMessage?.let {
+                        Log.d(TAG, "Success: $it")
+                        Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+                        viewModel.clearSuccess()
+                    }
                 }
             }
         }
@@ -225,13 +269,13 @@ class PaymentFragment : BaseFragment() {
         workerNameTextView.text = "[${worker.sequenceNumber}] ${worker.fullName}"
         workerSummaryCard.visibility = View.VISIBLE
         paymentHistoryRecyclerView.visibility = View.VISIBLE
-        emptyStateTextView.visibility = View.GONE
+        emptyStateLayout.visibility = View.GONE
     }
 
     private fun hideWorkerSummary() {
         workerSummaryCard.visibility = View.GONE
         paymentHistoryRecyclerView.visibility = View.GONE
-        emptyStateTextView.visibility = View.VISIBLE
+        emptyStateLayout.visibility = View.VISIBLE
     }
 
     private fun showFullPaymentDialog() {

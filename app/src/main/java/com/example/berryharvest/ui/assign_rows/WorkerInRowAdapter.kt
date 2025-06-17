@@ -4,6 +4,7 @@ import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.example.berryharvest.R
@@ -18,6 +19,7 @@ class WorkerInRowAdapter(
 
     inner class WorkerViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val workerTextView: TextView = view.findViewById(R.id.workerTextView)
+        val syncStatusIcon: ImageView = view.findViewById(R.id.syncStatusIcon)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): WorkerViewHolder {
@@ -40,21 +42,31 @@ class WorkerInRowAdapter(
 
         holder.workerTextView.text = workerInfo
 
-        // Set visual indication for sync status
+        // Handle sync status
         if (!assignment.isSynced) {
-            // Use a subtle background color
-            holder.itemView.setBackgroundColor(Color.parseColor("#15FFC107")) // Very light amber
             // Show sync icon
-            holder.workerTextView.setCompoundDrawablesWithIntrinsicBounds(0, 0, R.drawable.ic_sync_small, 0)
+            holder.syncStatusIcon.visibility = View.VISIBLE
+
+            // Add subtle background color to indicate unsynced state
+            holder.itemView.setBackgroundColor(Color.parseColor("#15FFC107")) // Very light amber
         } else {
+            // Hide sync icon
+            holder.syncStatusIcon.visibility = View.GONE
+
+            // Clear background color
             holder.itemView.setBackgroundColor(Color.TRANSPARENT)
-            holder.workerTextView.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
         }
 
         // Set long-click listener for move/delete options
-        holder.workerTextView.setOnLongClickListener {
+        holder.itemView.setOnLongClickListener {
             onMoveWorkerClick(assignment)
             true
+        }
+
+        // Optional: Add click listener for quick info or actions
+        holder.itemView.setOnClickListener {
+            // You can add quick actions here, like showing worker details
+            // For now, just provide visual feedback
         }
     }
 
@@ -62,5 +74,3 @@ class WorkerInRowAdapter(
         return assignments.size
     }
 }
-
-

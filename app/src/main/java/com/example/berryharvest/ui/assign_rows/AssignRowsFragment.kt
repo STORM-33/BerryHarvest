@@ -29,6 +29,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 
 class AssignRowsFragment : BaseFragment() {
     private val TAG = "AssignRowsFragment"
@@ -36,8 +38,6 @@ class AssignRowsFragment : BaseFragment() {
 
     private lateinit var rowNumberInputLayout: TextInputLayout
     private lateinit var rowEditText: TextInputEditText
-    private lateinit var searchInputLayout: TextInputLayout
-    private lateinit var searchRowEditText: TextInputEditText
     private lateinit var workerSearchView: SearchableSpinnerView
     private lateinit var assignButton: Button
     private lateinit var assignmentsRecyclerView: RecyclerView
@@ -59,8 +59,6 @@ class AssignRowsFragment : BaseFragment() {
         // Setup UI components
         rowNumberInputLayout = view.findViewById(R.id.rowNumberInputLayout)
         rowEditText = view.findViewById(R.id.rowEditText)
-        searchInputLayout = view.findViewById(R.id.searchInputLayout)
-        searchRowEditText = view.findViewById(R.id.searchRowEditText)
         workerSearchView = view.findViewById(R.id.workerSearchView)
         assignButton = view.findViewById(R.id.assignButton)
         assignmentsRecyclerView = view.findViewById(R.id.assignmentsRecyclerView)
@@ -68,10 +66,8 @@ class AssignRowsFragment : BaseFragment() {
         rowCountTextView = view.findViewById(R.id.rowCountTextView)
 
         setupUI()
-        setupValidation()
-        setupSearch()
+        setupValidationAndFiltering()
         setupWorkerSearch()
-        observeViewModel()
 
         return view
     }
@@ -79,53 +75,24 @@ class AssignRowsFragment : BaseFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        // Setup initial visibility to handle first load better
-        loadingProgressBar.visibility = View.VISIBLE
+        // Setup observers with proper lifecycle awareness
+        setupObservers()
 
-        // Observe when data is initialized
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.dataInitialized.collect { initialized ->
-                if (initialized) {
-                    // Only hide loading when data is actually initialized
-                    loadingProgressBar.visibility = View.GONE
-                }
-            }
-        }
-
-        // Make sure loading state is observed early
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.isLoading.collect { isLoading ->
-                loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
-                assignButton.isEnabled = !isLoading
-            }
-        }
-
-        // Force initial data load when the view is created
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewModel.loadInitialData()
-
-            // Add safety mechanism to ensure loading state isn't stuck
-            delay(1500) // Give enough time for normal loading to complete
-            viewModel.ensureLoadingStateReset()
-        }
+        // Ensure data is loaded
+        viewModel.ensureDataLoaded()
     }
 
     override fun onPause() {
         super.onPause()
         workerSearchView.hideDropdownForced()
-        // Clear selection when pausing fragment
         selectedWorker = null
     }
 
     override fun onResume() {
         super.onResume()
-        // Reset the searchable spinner completely
         workerSearchView.clearSelection()
         selectedWorker = null
-
-        // Ensure loading state is reset if it gets stuck
         viewModel.ensureLoadingStateReset()
-        viewModel.forceRefreshUI()
     }
 
     private fun setupUI() {
@@ -136,61 +103,57 @@ class AssignRowsFragment : BaseFragment() {
         }
 
         // Initialize adapter
-        val adapter = createAssignmentAdapter()
+        assignmentAdapter = createAssignmentAdapter()
 
-        // Setup recycler view with explicit dimensions and visibility
-        assignmentsRecyclerView.visibility = View.VISIBLE
-        assignmentsRecyclerView.adapter = adapter
-        assignmentsRecyclerView.layoutManager = LinearLayoutManager(requireContext())
+        // Setup recycler view
+        assignmentsRecyclerView.apply {
+            visibility = View.VISIBLE
+            adapter = assignmentAdapter
+            layoutManager = LinearLayoutManager(requireContext())
+        }
 
-        // Add this to check RecyclerView after layout
+        // Debug RecyclerView dimensions
         assignmentsRecyclerView.post {
             Log.d(TAG, "RecyclerView width: ${assignmentsRecyclerView.width}, " +
                     "height: ${assignmentsRecyclerView.height}, " +
                     "visibility: ${assignmentsRecyclerView.visibility == View.VISIBLE}")
         }
-
-        assignmentAdapter = adapter
     }
 
-    private fun setupValidation() {
-        // Set focus change listener for validation
+    private fun setupValidationAndFiltering() {
+        rowEditText.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+
+            override fun afterTextChanged(s: Editable?) {
+                val text = s.toString().trim()
+                filterAssignments(text)
+
+                if (rowNumberInputLayout.error != null) {
+                    rowNumberInputLayout.error = null
+                }
+            }
+        })
+
         rowEditText.setOnFocusChangeListener { _, hasFocus ->
             if (!hasFocus) {
                 validateRowNumber(rowEditText.text.toString())
-            } else {
-                rowNumberInputLayout.error = null
             }
         }
     }
 
-    private fun setupSearch() {
-        searchRowEditText.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-
-            override fun afterTextChanged(s: Editable?) {
-                filterAssignments(s.toString())
-            }
-        })
-    }
-
     private fun filterAssignments(query: String) {
         if (query.isEmpty()) {
-            // No query, show all assignments
             filteredAssignments = allAssignments
             assignmentAdapter.submitList(filteredAssignments)
             updateRowCount(filteredAssignments.size)
             return
         }
 
-        // Filter by row number
         filteredAssignments = allAssignments.filter { assignmentGroup ->
             assignmentGroup.rowNumber.toString().contains(query)
         }
 
-        // Update the adapter with filtered results
         assignmentAdapter.submitList(filteredAssignments)
         updateRowCount(filteredAssignments.size)
     }
@@ -238,90 +201,101 @@ class AssignRowsFragment : BaseFragment() {
         )
     }
 
-    private fun observeViewModel() {
-        // Observe assignments
-        launchWhenStarted("assignments-flow") {
-            viewModel.assignments.collect { assignments ->
-                Log.d(TAG, "Received ${assignments.size} assignment groups")
+    private fun setupObservers() {
+        // Observe assignments with proper lifecycle handling
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.assignments.collect { assignments ->
+                    Log.d(TAG, "Received ${assignments.size} assignment groups")
 
-                // Store all assignments for filtering
-                allAssignments = assignments
+                    allAssignments = assignments
+                    val query = rowEditText.text?.toString()?.trim() ?: ""
 
-                // If there's a search query, apply filtering
-                val query = searchRowEditText.text.toString()
-                if (query.isNotEmpty()) {
-                    filterAssignments(query)
-                } else {
-                    // Otherwise show all and update adapter
-                    filteredAssignments = assignments
-                    assignmentAdapter.submitList(ArrayList(assignments))
-                    updateRowCount(assignments.size)
+                    if (query.isNotEmpty()) {
+                        filterAssignments(query)
+                    } else {
+                        filteredAssignments = assignments
+                        assignmentAdapter.submitList(ArrayList(assignments))
+                        updateRowCount(assignments.size)
+                    }
                 }
             }
         }
 
         // Observe worker details
-        launchWhenStarted("worker-details") {
-            viewModel.workerDetails.collect { workerMap ->
-                assignmentAdapter.updateWorkerDetails(workerMap)
-            }
-        }
-
-        // Observe errors
-        launchWhenStarted("error-flow") {
-            viewModel.error.collect { errorMessage ->
-                errorMessage?.let {
-                    Toast.makeText(requireContext(), it, Toast.LENGTH_SHORT).show()
-                    viewModel.clearError()
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.workerDetails.collect { workerMap ->
+                    Log.d(TAG, "Updating worker details: ${workerMap.size} workers")
+                    assignmentAdapter.updateWorkerDetails(workerMap)
                 }
             }
         }
 
         // Observe loading state
-        launchWhenStarted("loading-state") {
-            viewModel.isLoading.collect { isLoading ->
-                loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
-                assignButton.isEnabled = !isLoading
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.isLoading.collect { isLoading ->
+                    loadingProgressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
+                    assignButton.isEnabled = !isLoading
+                }
+            }
+        }
+
+        // Observe data initialization
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.dataInitialized.collect { initialized ->
+                    if (initialized) {
+                        loadingProgressBar.visibility = View.GONE
+                    }
+                }
+            }
+        }
+
+        // Observe errors
+        viewLifecycleOwner.lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.error.collect { errorMessage ->
+                    errorMessage?.let {
+                        Toast.makeText(requireContext(), it, Toast.LENGTH_SHORT).show()
+                        viewModel.clearError()
+                    }
+                }
             }
         }
     }
 
     private fun setupWorkerSearch() {
-        // Reset the spinner state first
         workerSearchView.clearSelection()
         selectedWorker = null
 
-        // Set up a flag to track if adapter has been initialized
         var adapterInitialized = false
 
         viewLifecycleOwner.lifecycleScope.launch {
-            // Observe all workers for search
-            viewModel.allWorkers.collect { workers ->
-                if (workers.isEmpty()) {
-                    Log.d(TAG, "Worker list is empty, waiting for data")
-                    return@collect
-                }
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.allWorkers.collect { workers ->
+                    if (workers.isEmpty()) {
+                        Log.d(TAG, "Worker list is empty, waiting for data")
+                        return@collect
+                    }
 
-                Log.d(TAG, "Setting up worker search with ${workers.size} workers")
+                    Log.d(TAG, "Setting up worker search with ${workers.size} workers")
 
-                // Create a fresh adapter each time but only if we have workers
-                val searchableItems = workers.map { it.toSearchableItem() }
+                    val searchableItems = workers.map { it.toSearchableItem() }
 
-                // Only set adapter if it wasn't already set with non-empty data
-                if (!adapterInitialized || searchableItems.isNotEmpty()) {
-                    workerSearchView.setAdapter(searchableItems)
-                    adapterInitialized = true
+                    if (!adapterInitialized || searchableItems.isNotEmpty()) {
+                        workerSearchView.setAdapter(searchableItems)
+                        adapterInitialized = true
+                        workerSearchView.clearSelection()
+                        selectedWorker = null
+                    }
 
-                    // Reset selection when adapter changes
-                    workerSearchView.clearSelection()
-                    selectedWorker = null
-                }
-
-                // Set the listener each time to ensure it's registered
-                workerSearchView.setOnItemSelectedListener { searchableItem ->
-                    val workerItem = searchableItem as WorkerSearchableItem
-                    selectedWorker = workerItem.worker
-                    Log.d(TAG, "Selected worker: ${workerItem.worker.fullName}")
+                    workerSearchView.setOnItemSelectedListener { searchableItem ->
+                        val workerItem = searchableItem as WorkerSearchableItem
+                        selectedWorker = workerItem.worker
+                        Log.d(TAG, "Selected worker: ${workerItem.worker.fullName}")
+                    }
                 }
             }
         }
@@ -332,7 +306,6 @@ class AssignRowsFragment : BaseFragment() {
         val rowNumber = rowNumberText.toIntOrNull() ?: return
         val worker = selectedWorker ?: return
 
-        // Check if worker is already assigned to another row
         checkExistingAssignment(worker)
     }
 
@@ -341,17 +314,14 @@ class AssignRowsFragment : BaseFragment() {
             loadingProgressBar.visibility = View.VISIBLE
 
             try {
-                // Use ViewModel to check existing assignment
                 val result = viewModel.checkWorkerAssignment(worker._id)
 
                 when (result) {
                     is com.example.berryharvest.data.repository.Result.Success -> {
                         val rowNumber = result.data
                         if (rowNumber > 0) {
-                            // Worker already assigned to a row, show confirmation dialog
                             showReassignConfirmationDialog(worker, rowNumber)
                         } else {
-                            // Worker not assigned, proceed directly
                             proceedWithAssignment(worker)
                         }
                     }
@@ -359,7 +329,7 @@ class AssignRowsFragment : BaseFragment() {
                         Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
                     }
                     is com.example.berryharvest.data.repository.Result.Loading -> {
-                        // Loading is already handled
+                        // Loading is handled by progress bar
                     }
                 }
             } catch (e: Exception) {
@@ -374,7 +344,6 @@ class AssignRowsFragment : BaseFragment() {
     private fun showReassignConfirmationDialog(worker: Worker, currentRow: Int) {
         val rowNumber = rowEditText.text.toString().toInt()
 
-        // If trying to assign to the same row, just show a message
         if (currentRow == rowNumber) {
             Toast.makeText(requireContext(),
                 "Працівник вже на ряду $currentRow",
@@ -395,39 +364,26 @@ class AssignRowsFragment : BaseFragment() {
     private fun proceedWithAssignment(worker: Worker) {
         val rowNumber = rowEditText.text.toString().toInt()
 
-        // Show loading immediately
         loadingProgressBar.visibility = View.VISIBLE
         assignButton.isEnabled = false
 
         lifecycleScope.launch {
             try {
-                // Use ViewModel to assign worker to row
                 val result = viewModel.assignWorkerToRow(worker._id, rowNumber)
 
                 when (result) {
                     is com.example.berryharvest.data.repository.Result.Success -> {
                         Toast.makeText(requireContext(), "Призначено на ряд $rowNumber", Toast.LENGTH_SHORT).show()
 
-                        // Clear selection
                         workerSearchView.clearSelection()
                         selectedWorker = null
-
-                        // Clear row number
-                        // rowEditText.text?.clear()
-                        // rowNumberInputLayout.error = null
-
-                        // If searching for this row, make sure it stays visible
-                        val searchQuery = searchRowEditText.text.toString()
-                        if (searchQuery.isNotEmpty() && !rowNumber.toString().contains(searchQuery)) {
-                            // Clear search to show all rows including the new assignment
-                            searchRowEditText.text?.clear()
-                        }
+                        rowNumberInputLayout.error = null
                     }
                     is com.example.berryharvest.data.repository.Result.Error -> {
                         Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
                     }
                     is com.example.berryharvest.data.repository.Result.Loading -> {
-                        // Loading is already handled
+                        // Loading is handled by progress bar
                     }
                 }
             } catch (e: Exception) {
@@ -455,7 +411,6 @@ class AssignRowsFragment : BaseFragment() {
         moveButton.setOnClickListener {
             val newRowText = newRowEditText.text.toString().trim()
 
-            // Validate row number
             if (newRowText.isEmpty()) {
                 newRowInputLayout.error = "Введіть номер"
                 return@setOnClickListener
@@ -467,14 +422,10 @@ class AssignRowsFragment : BaseFragment() {
                 return@setOnClickListener
             }
 
-            // Valid input, clear error
             newRowInputLayout.error = null
-
-            // Show loading
             loadingProgressBar.visibility = View.VISIBLE
             dialog.dismiss()
 
-            // Use ViewModel to move worker
             lifecycleScope.launch {
                 try {
                     val result = viewModel.moveWorkerToRow(assignment._id, newRowNumber)
@@ -483,18 +434,16 @@ class AssignRowsFragment : BaseFragment() {
                         is com.example.berryharvest.data.repository.Result.Success -> {
                             Toast.makeText(requireContext(), "Переміщено на ряд $newRowNumber", Toast.LENGTH_SHORT).show()
 
-                            // If searching, make sure the row stays visible
-                            val searchQuery = searchRowEditText.text.toString()
-                            if (searchQuery.isNotEmpty() && !newRowNumber.toString().contains(searchQuery)) {
-                                // Clear search to show all rows including the moved assignment
-                                searchRowEditText.text?.clear()
+                            val currentQuery = rowEditText.text?.toString()?.trim() ?: ""
+                            if (currentQuery.isNotEmpty() && !newRowNumber.toString().contains(currentQuery)) {
+                                rowEditText.text?.clear()
                             }
                         }
                         is com.example.berryharvest.data.repository.Result.Error -> {
                             Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
                         }
                         is com.example.berryharvest.data.repository.Result.Loading -> {
-                            // Loading is already handled
+                            // Loading is handled by progress bar
                         }
                     }
                 } catch (e: Exception) {
@@ -510,41 +459,29 @@ class AssignRowsFragment : BaseFragment() {
             AlertDialog.Builder(requireContext())
                 .setTitle("Вилучити працівника з ряду?")
                 .setPositiveButton("Так") { _, _ ->
-                    // Show loading
                     loadingProgressBar.visibility = View.VISIBLE
                     dialog.dismiss()
 
-                    // Direct delete operation
-                    lifecycleScope.launch(Dispatchers.IO) {
+                    lifecycleScope.launch {
                         try {
-                            val app = requireActivity().application as BerryHarvestApplication
-                            val realm = app.getRealmInstance()
+                            val result = viewModel.deleteWorkerAssignment(assignment._id)
 
-                            // Store the assignment ID
-                            val assignmentId = assignment._id
-
-                            // Quick, focused transaction
-                            realm.write {
-                                query<Assignment>("_id == $0", assignmentId)
-                                    .first().find()?.let {
-                                        delete(it)
-                                    }
-                            }
-
-                            withContext(Dispatchers.Main) {
-                                if (isAdded) {
-                                    loadingProgressBar.visibility = View.GONE
+                            when (result) {
+                                is com.example.berryharvest.data.repository.Result.Success -> {
                                     Toast.makeText(requireContext(), "Працівник вилучений", Toast.LENGTH_SHORT).show()
+                                }
+                                is com.example.berryharvest.data.repository.Result.Error -> {
+                                    Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
+                                }
+                                is com.example.berryharvest.data.repository.Result.Loading -> {
+                                    // Loading is handled by progress bar
                                 }
                             }
                         } catch (e: Exception) {
                             Log.e(TAG, "Error deleting worker assignment", e)
-                            withContext(Dispatchers.Main) {
-                                if (isAdded) {
-                                    loadingProgressBar.visibility = View.GONE
-                                    Toast.makeText(requireContext(), "Помилка: ${e.message}", Toast.LENGTH_SHORT).show()
-                                }
-                            }
+                            Toast.makeText(requireContext(), "Помилка: ${e.message}", Toast.LENGTH_SHORT).show()
+                        } finally {
+                            loadingProgressBar.visibility = View.GONE
                         }
                     }
                 }
@@ -557,13 +494,11 @@ class AssignRowsFragment : BaseFragment() {
 
     private fun showRemoveRowConfirmation(rowNumber: Int) {
         AlertDialog.Builder(requireContext())
-            .setTitle("Видалити рядок")
-            .setMessage("Видалити ряд $rowNumber та всі призначення?")
+            .setTitle("Видалити призначення")
+            .setMessage("Видалити всі призначення з ряду $rowNumber?")
             .setPositiveButton("Так") { _, _ ->
-                // Show loading
                 loadingProgressBar.visibility = View.VISIBLE
 
-                // Use ViewModel to delete row
                 lifecycleScope.launch {
                     try {
                         val result = viewModel.deleteEntireRow(rowNumber)
@@ -576,7 +511,7 @@ class AssignRowsFragment : BaseFragment() {
                                 Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
                             }
                             is com.example.berryharvest.data.repository.Result.Loading -> {
-                                // Loading is already handled
+                                // Loading is handled by progress bar
                             }
                         }
                     } catch (e: Exception) {
@@ -591,4 +526,3 @@ class AssignRowsFragment : BaseFragment() {
             .show()
     }
 }
-

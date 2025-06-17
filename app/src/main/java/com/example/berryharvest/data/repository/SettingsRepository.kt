@@ -1,6 +1,7 @@
 package com.example.berryharvest.data.repository
 
 import com.example.berryharvest.data.model.Settings
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Repository interface for Settings entities.
@@ -20,4 +21,10 @@ interface SettingsRepository : BaseRepository<Settings> {
      * Update the punnet price.
      */
     suspend fun updatePunnetPrice(price: Float): Result<Boolean>
+
+    /**
+     * Real-time flow of punnet price changes.
+     * ViewModels should observe this to get automatic price updates.
+     */
+    val punnetPriceFlow: StateFlow<Float>
 }
