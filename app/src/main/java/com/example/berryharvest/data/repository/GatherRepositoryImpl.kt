@@ -2,9 +2,9 @@ package com.example.berryharvest.data.repository
 
 import android.app.Application
 import android.util.Log
+import com.example.berryharvest.NetworkConnectivityManager
 import com.example.berryharvest.data.model.Gather
 import com.example.berryharvest.data.model.Worker
-import com.example.berryharvest.data.network.EnhancedNetworkManager
 import com.example.berryharvest.ui.gather.GatherWithDetails
 import com.example.berryharvest.ui.gather.TodayStats
 import io.realm.kotlin.MutableRealm
@@ -24,7 +24,7 @@ import java.util.UUID
  */
 class GatherRepositoryImpl(
     application: Application,
-    networkManager: EnhancedNetworkManager,
+    networkManager: NetworkConnectivityManager,
     databaseTransactionManager: DatabaseTransactionManager
 ) : BaseRepositoryImpl<Gather>(
     application = application,
@@ -408,6 +408,47 @@ class GatherRepositoryImpl(
         } catch (e: Exception) {
             Log.e(logTag, "Error in updateGatherDetails", e)
             setError("Failed to update gather: ${e.message}")
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Get gathers for a specific row with worker details grouped by date.
+     */
+    override suspend fun getGatherHistoryByRowNumber(rowNumber: Int): Result<List<GatherWithDetails>> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Getting gather history for row: $rowNumber")
+
+            // Query gathers for the specific row number, ordered by date descending
+            val gathers = realm.query<Gather>("rowNumber == $0 AND isDeleted == false", rowNumber)
+                .sort("dateTime", Sort.DESCENDING)
+                .find()
+
+            // Create list of GatherWithDetails
+            val gathersWithDetails = mutableListOf<GatherWithDetails>()
+
+            for (gather in gathers) {
+                val worker = realm.query<Worker>("_id == $0", gather.workerId).first().find()
+                val workerName = if (worker != null) {
+                    "${worker.fullName} [${worker.sequenceNumber}]"
+                } else {
+                    "Невідомий працівник"
+                }
+
+                gathersWithDetails.add(
+                    GatherWithDetails(
+                        gather = gather,
+                        workerName = workerName,
+                        dateTime = gather.dateTime
+                    )
+                )
+            }
+
+            Log.d(logTag, "Found ${gathersWithDetails.size} gathers for row $rowNumber")
+            Result.Success(gathersWithDetails)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error getting gather history for row", e)
+            setError("Failed to get gather history: ${e.message}")
             Result.Error(e)
         }
     }

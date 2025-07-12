@@ -3,7 +3,7 @@ package com.example.berryharvest.data.repository
 import android.app.Application
 import android.util.Log
 import com.example.berryharvest.BerryHarvestApplication
-import com.example.berryharvest.data.network.EnhancedNetworkManager
+import com.example.berryharvest.NetworkConnectivityManager
 
 /**
  * Provides access to all repositories in the application.
@@ -11,7 +11,7 @@ import com.example.berryharvest.data.network.EnhancedNetworkManager
  * that only one instance of each repository is created.
  */
 class RepositoryProvider(private val application: Application) {
-    val networkManager = EnhancedNetworkManager(application)
+    val networkManager = NetworkConnectivityManager(application)
     val databaseTransactionManager = DatabaseTransactionManager(application as BerryHarvestApplication)
 
     // Lazy initialization for all repositories with the transaction manager

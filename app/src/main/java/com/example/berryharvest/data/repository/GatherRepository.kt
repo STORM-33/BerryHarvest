@@ -19,6 +19,11 @@ interface GatherRepository : BaseRepository<Gather> {
     suspend fun getGathersByWorkerId(workerId: String): Result<List<Gather>>
 
     /**
+     * Get gathers for a specific row with worker details grouped by date.
+     */
+    suspend fun getGatherHistoryByRowNumber(rowNumber: Int): Result<List<GatherWithDetails>>
+
+    /**
      * Calculate statistics for today.
      */
     suspend fun calculateTodayStats(): Result<TodayStats>

@@ -1,6 +1,5 @@
 package com.example.berryharvest.ui.add_worker
 
-import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.os.Bundle
 import android.text.Editable
@@ -10,25 +9,20 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
-import androidx.fragment.app.Fragment
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DividerItemDecoration
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.berryharvest.BaseFragment
-import com.example.berryharvest.BerryHarvestApplication
 import com.example.berryharvest.R
+import com.example.berryharvest.RealmManager
 import com.example.berryharvest.data.model.Worker
-import com.example.berryharvest.data.repository.ConnectionState
+import com.example.berryharvest.util.MemoryMonitor
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
-import io.realm.kotlin.ext.query
-import io.realm.kotlin.query.max
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.util.UUID
 import java.util.regex.Pattern
 
 class AddWorkerFragment : BaseFragment() {
@@ -97,7 +91,12 @@ class AddWorkerFragment : BaseFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        Log.d("MemoryTest", "Fragment created: ${MemoryMonitor.getSimpleMemoryInfo()}")
+        Log.d("RealmTest", "Active instances: ${RealmManager.getActiveInstanceCount()}")
+
         setupObservers()
+        addDebugControls()
     }
 
     private fun setupRecyclerView() {
@@ -446,5 +445,175 @@ class AddWorkerFragment : BaseFragment() {
             }
             .setNegativeButton("Ні", null)
             .show()
+    }
+
+
+    private fun addDebugControls() {
+        if (false) { // Only show in debug builds
+            val rootLayout = view as ConstraintLayout
+
+            // Create debug container that goes between divider and workers list
+            val debugContainer = LinearLayout(requireContext()).apply {
+                id = View.generateViewId()
+                orientation = LinearLayout.VERTICAL
+                setPadding(8, 8, 8, 8)
+            }
+
+            // Row 1: Analysis and Testing
+            val analysisRow = LinearLayout(requireContext()).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = 4 }
+            }
+
+            // Analyze sync setup
+            val analyzeButton = Button(requireContext()).apply {
+                text = "Analyze"
+                textSize = 9f
+                setPadding(6, 3, 6, 3)
+                setBackgroundColor(android.graphics.Color.parseColor("#2196F3")) // Blue
+                setTextColor(android.graphics.Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginEnd = 3
+                }
+                setOnClickListener {
+                    viewModel.analyzeSyncSetup()
+                }
+            }
+
+            // Test real sync
+            val testRealSyncButton = Button(requireContext()).apply {
+                text = "Test Sync"
+                textSize = 9f
+                setPadding(6, 3, 6, 3)
+                setBackgroundColor(android.graphics.Color.parseColor("#4CAF50")) // Green
+                setTextColor(android.graphics.Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginEnd = 3
+                }
+                setOnClickListener {
+                    viewModel.testRealSyncFunction()
+                }
+            }
+
+            // Quick status check
+            val quickStatusButton = Button(requireContext()).apply {
+                text = "Status"
+                textSize = 9f
+                setPadding(6, 3, 6, 3)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginEnd = 3
+                }
+                setOnClickListener {
+                    viewModel.getQuickSyncStatus()
+                }
+            }
+
+            // Debug report
+            val debugButton = Button(requireContext()).apply {
+                text = "Debug"
+                textSize = 9f
+                setPadding(6, 3, 6, 3)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener {
+                    viewModel.getFullSyncDebugReport()
+                }
+            }
+
+            analysisRow.addView(analyzeButton)
+            analysisRow.addView(testRealSyncButton)
+            analysisRow.addView(quickStatusButton)
+            analysisRow.addView(debugButton)
+
+            // Row 2: Fix and Reset
+            val actionRow = LinearLayout(requireContext()).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+            }
+
+            // Attempt fix
+            val fixButton = Button(requireContext()).apply {
+                text = "Fix"
+                textSize = 9f
+                setPadding(6, 3, 6, 3)
+                setBackgroundColor(android.graphics.Color.parseColor("#FF9800")) // Orange
+                setTextColor(android.graphics.Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginEnd = 3
+                }
+                setOnClickListener {
+                    viewModel.attemptSyncFix()
+                }
+            }
+
+            // Nuclear reset
+            val resetButton = Button(requireContext()).apply {
+                text = "Reset"
+                textSize = 9f
+                setPadding(6, 3, 6, 3)
+                setBackgroundColor(android.graphics.Color.RED)
+                setTextColor(android.graphics.Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginEnd = 3
+                }
+                setOnClickListener {
+                    AlertDialog.Builder(requireContext())
+                        .setTitle("Nuclear Reset")
+                        .setMessage("This will reset all sync state. You'll need to restart the app. Continue?")
+                        .setPositiveButton("YES, RESET") { _, _ ->
+                            viewModel.resetEverything()
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
+            }
+
+            // Help button
+            val helpButton = Button(requireContext()).apply {
+                text = "Help"
+                textSize = 9f
+                setPadding(6, 3, 6, 3)
+                setBackgroundColor(android.graphics.Color.parseColor("#9C27B0")) // Purple
+                setTextColor(android.graphics.Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener {
+
+                }
+            }
+
+            actionRow.addView(fixButton)
+            actionRow.addView(resetButton)
+            actionRow.addView(helpButton)
+
+            // Add rows to container
+            debugContainer.addView(analysisRow)
+            debugContainer.addView(actionRow)
+
+            // Add debug container to the constraint layout
+            rootLayout.addView(debugContainer)
+
+            // Set constraints to position it between divider and workers list title
+            val layoutParams = debugContainer.layoutParams as ConstraintLayout.LayoutParams
+            layoutParams.apply {
+                topToBottom = R.id.divider
+                bottomToTop = R.id.workersListTitle
+                startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+                endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+                topMargin = 8
+                bottomMargin = 8
+            }
+            debugContainer.layoutParams = layoutParams
+
+            // Update workers list title constraint to be below debug container
+            val titleView = rootLayout.findViewById<TextView>(R.id.workersListTitle)
+            val titleParams = titleView.layoutParams as ConstraintLayout.LayoutParams
+            titleParams.topToBottom = debugContainer.id
+            titleView.layoutParams = titleParams
+        }
     }
 }

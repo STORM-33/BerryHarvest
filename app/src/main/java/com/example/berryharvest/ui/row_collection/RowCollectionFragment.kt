@@ -5,11 +5,13 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.berryharvest.BaseFragment
 import com.example.berryharvest.R
+import com.example.berryharvest.data.model.Row
 import com.example.berryharvest.data.repository.ConnectionState
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
@@ -59,9 +61,14 @@ class RowCollectionFragment : BaseFragment() {
     }
 
     private fun setupRecyclerView() {
-        rowAdapter = RowAdapter { row ->
-            viewModel.toggleRowCollection(row._id)
-        }
+        rowAdapter = RowAdapter(
+            onRowClick = { row ->
+                viewModel.toggleRowCollection(row._id)
+            },
+            onRowLongClick = { row ->
+                showWorkerHistoryDialog(row)
+            }
+        )
 
         recyclerViewRows.adapter = rowAdapter
         recyclerViewRows.layoutManager = LinearLayoutManager(context)
@@ -164,5 +171,43 @@ class RowCollectionFragment : BaseFragment() {
 
             is ConnectionState.Error -> {}
         }
+    }
+
+    private fun showWorkerHistoryDialog(row: Row) {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_worker_history, null)
+        val titleTextView: TextView = dialogView.findViewById(R.id.dialogTitleTextView)
+        val rowInfoTextView: TextView = dialogView.findViewById(R.id.rowInfoTextView)
+        val historyRecyclerView: RecyclerView = dialogView.findViewById(R.id.workerHistoryRecyclerView)
+        val emptyHistoryTextView: TextView = dialogView.findViewById(R.id.emptyHistoryTextView)
+
+        // Set row info
+        rowInfoTextView.text = "Ряд: ${row.rowNumber}"
+
+        // Setup recycler view
+        val historyAdapter = WorkerHistoryAdapter()
+        historyRecyclerView.adapter = historyAdapter
+        historyRecyclerView.layoutManager = LinearLayoutManager(requireContext())
+
+        // Create dialog
+        val dialog = AlertDialog.Builder(requireContext())
+            .setView(dialogView)
+            .setPositiveButton("Закрити", null)
+            .create()
+
+        // Load and display history
+        viewModel.getRowWorkerHistory(row.rowNumber) { history ->
+            requireActivity().runOnUiThread {
+                if (history.isEmpty()) {
+                    historyRecyclerView.visibility = View.GONE
+                    emptyHistoryTextView.visibility = View.VISIBLE
+                } else {
+                    historyRecyclerView.visibility = View.VISIBLE
+                    emptyHistoryTextView.visibility = View.GONE
+                    historyAdapter.submitHistory(history)
+                }
+            }
+        }
+
+        dialog.show()
     }
 }

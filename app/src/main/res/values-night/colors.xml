@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Text Colors for Dark Theme -->
+    <color name="text_secondary">#AAAAAA</color>
+
+    <!-- Table Colors for Dark Theme -->
+    <color name="table_header_background">#2C2C2C</color>
+    <color name="table_header_text">#E0E0E0</color>
+</resources>

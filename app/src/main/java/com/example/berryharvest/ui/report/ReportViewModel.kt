@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.berryharvest.BerryHarvestApplication
 import com.example.berryharvest.data.model.Gather
 import com.example.berryharvest.data.model.Worker
+import com.example.berryharvest.data.model.PaymentRecord
 import com.example.berryharvest.data.repository.ConnectionState
 import io.realm.kotlin.ext.query
 import kotlinx.coroutines.Dispatchers
@@ -41,13 +42,9 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
     private val _summaryStats = MutableStateFlow<SummaryStats?>(null)
     val summaryStats: StateFlow<SummaryStats?> = _summaryStats.asStateFlow()
 
-    // Top workers
-    private val _topWorkers = MutableStateFlow<List<WorkerStats>>(emptyList())
-    val topWorkers: StateFlow<List<WorkerStats>> = _topWorkers.asStateFlow()
-
-    // Daily production
-    private val _dailyProduction = MutableStateFlow<List<DailyProduction>>(emptyList())
-    val dailyProduction: StateFlow<List<DailyProduction>> = _dailyProduction.asStateFlow()
+    // Worker stats
+    private val _workerStats = MutableStateFlow<List<WorkerStats>>(emptyList())
+    val workerStats: StateFlow<List<WorkerStats>> = _workerStats.asStateFlow()
 
     init {
         observeConnectionState()
@@ -76,8 +73,7 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
                 withContext(Dispatchers.IO) {
                     // Load all data in parallel for efficiency
                     launch { loadSummaryStats() }
-                    launch { loadTopWorkers() }
-                    launch { loadDailyProduction() }
+                    launch { loadWorkerStats() }
                 }
 
             } catch (e: Exception) {
@@ -101,12 +97,14 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
             // Get all non-deleted gathers
             val gathers = realm.query<Gather>("isDeleted == false").find()
 
-            // Calculate total punnets and earnings
+            // Get all payment records
+            val payments = realm.query<PaymentRecord>("isDeleted == false").find()
+
+            // Calculate total trays and total paid
             var totalPunnets = 0
-            var totalEarnings = 0.0f
-            var workerCount = 0
+            var totalPaid = 0.0f
             var todayPunnets = 0
-            var todayEarnings = 0.0f
+            var todayToPay = 0.0f
 
             // Calculate the start of today
             val calendar = Calendar.getInstance()
@@ -120,11 +118,7 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
             // Process each gather
             for (gather in gathers) {
                 val punnets = gather.numOfPunnets ?: 0
-                val cost = gather.punnetCost ?: 0.0f
-                val earnings = punnets * cost
-
                 totalPunnets += punnets
-                totalEarnings += earnings
 
                 // Check if this gather is from today
                 val gatherDateStr = gather.dateTime
@@ -133,7 +127,8 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
                         val gatherDate = dateFormat.parse(gatherDateStr)?.time ?: 0
                         if (gatherDate >= startOfToday) {
                             todayPunnets += punnets
-                            todayEarnings += earnings
+                            val cost = gather.punnetCost ?: 0.0f
+                            todayToPay += punnets * cost
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error parsing date: $gatherDateStr", e)
@@ -141,17 +136,27 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
 
-            // Count active workers
-            workerCount = realm.query<Worker>("isDeleted == false").count().find().toInt()
+            // Calculate total paid from payment records
+            for (payment in payments) {
+                if (payment.amount > 0) { // Only count positive payments (money given to workers)
+                    totalPaid += payment.amount
+                }
+            }
+
+            // Calculate average workers per day
+            val avgWorkersPerDay = calculateAverageWorkersPerDay(gathers, dateFormat)
+
+            // Count active workers today
+            val activeWorkersToday = countActiveWorkersToday(gathers, dateFormat, startOfToday)
 
             // Create the stats object
             val stats = SummaryStats(
-                totalPunnets = totalPunnets,
-                totalEarnings = totalEarnings,
-                workerCount = workerCount,
-                todayPunnets = todayPunnets,
-                todayEarnings = todayEarnings,
-                avgPunnetsPerWorker = if (workerCount > 0) totalPunnets.toFloat() / workerCount else 0f
+                totalTrays = totalPunnets / 10, // Convert punnets to trays
+                totalPaid = totalPaid,
+                avgWorkersPerDay = avgWorkersPerDay,
+                todayTrays = todayPunnets / 10, // Convert punnets to trays
+                todayToPay = todayToPay,
+                activeWorkersToday = activeWorkersToday
             )
 
             _summaryStats.value = stats
@@ -162,8 +167,65 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // Load top performing workers
-    private suspend fun loadTopWorkers() {
+    private fun calculateAverageWorkersPerDay(
+        gathers: List<Gather>,
+        dateFormat: SimpleDateFormat
+    ): Float {
+        // Group gathers by date and count unique workers per day
+        val workersByDay = mutableMapOf<String, MutableSet<String>>()
+
+        for (gather in gathers) {
+            val dateTimeStr = gather.dateTime ?: continue
+            val workerId = gather.workerId ?: continue
+
+            try {
+                // Extract just the date part (YYYY-MM-DD)
+                val datePart = dateTimeStr.substring(0, 10)
+
+                if (!workersByDay.containsKey(datePart)) {
+                    workersByDay[datePart] = mutableSetOf()
+                }
+                workersByDay[datePart]?.add(workerId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error processing date for worker average: $dateTimeStr", e)
+            }
+        }
+
+        // Calculate average
+        return if (workersByDay.isNotEmpty()) {
+            val totalWorkerDays = workersByDay.values.sumOf { it.size }
+            totalWorkerDays.toFloat() / workersByDay.size
+        } else {
+            0f
+        }
+    }
+
+    private fun countActiveWorkersToday(
+        gathers: List<Gather>,
+        dateFormat: SimpleDateFormat,
+        startOfToday: Long
+    ): Int {
+        val activeWorkersToday = mutableSetOf<String>()
+
+        for (gather in gathers) {
+            val dateTimeStr = gather.dateTime ?: continue
+            val workerId = gather.workerId ?: continue
+
+            try {
+                val gatherDate = dateFormat.parse(dateTimeStr)?.time ?: 0
+                if (gatherDate >= startOfToday) {
+                    activeWorkersToday.add(workerId)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing date for active workers: $dateTimeStr", e)
+            }
+        }
+
+        return activeWorkersToday.size
+    }
+
+    // Load worker performance statistics
+    private suspend fun loadWorkerStats() {
         try {
             val realm = app.getRealmInstance()
 
@@ -174,7 +236,7 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
             val gathers = realm.query<Gather>("isDeleted == false").find()
 
             // Group gathers by worker
-            val workerStats = mutableListOf<WorkerStats>()
+            val workerStatsList = mutableListOf<WorkerStats>()
 
             // Create a map of worker ID to Worker object for quick lookup
             val workerMap = workers.associateBy { it._id }
@@ -190,112 +252,53 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
 
                 var totalPunnets = 0
                 var totalEarnings = 0.0f
+                val workerDays = mutableSetOf<String>()
 
                 for (gather in workerGathers) {
                     val punnets = gather.numOfPunnets ?: 0
                     val cost = gather.punnetCost ?: 0.0f
 
                     totalPunnets += punnets
-                    totalEarnings += punnets * cost
+                    totalEarnings += (punnets * cost) // Calculate earnings for this gather
+
+                    // Count unique days this worker worked
+                    val dateTimeStr = gather.dateTime
+                    if (dateTimeStr != null) {
+                        try {
+                            val datePart = dateTimeStr.substring(0, 10) // YYYY-MM-DD
+                            workerDays.add(datePart)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error processing date for worker stats: $dateTimeStr", e)
+                        }
+                    }
                 }
 
-                workerStats.add(
+                val avgPunnetsPerDay = if (workerDays.isNotEmpty()) {
+                    totalPunnets.toFloat() / workerDays.size
+                } else {
+                    0f
+                }
+
+                workerStatsList.add(
                     WorkerStats(
                         workerId = workerId,
                         workerName = worker.fullName,
                         sequenceNumber = worker.sequenceNumber,
                         totalPunnets = totalPunnets,
-                        totalEarnings = totalEarnings
+                        totalEarnings = totalEarnings, // Include total earnings
+                        avgPunnetsPerDay = avgPunnetsPerDay
                     )
                 )
             }
 
-            // Sort by punnets or earnings (here by earnings)
-            val sortedStats = workerStats.sortedByDescending { it.totalEarnings }
+            // Sort by total earnings (descending) - this makes more sense for leaderboard
+            val sortedStats = workerStatsList.sortedByDescending { it.totalEarnings }
 
-            // Take top 10 for display
-            _topWorkers.value = sortedStats.take(10)
+            _workerStats.value = sortedStats
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error loading top workers", e)
+            Log.e(TAG, "Error loading worker stats", e)
             _errorMessage.value = "Помилка при завантаженні даних працівників: ${e.message}"
-        }
-    }
-
-    // Load daily production statistics for the last 7 days
-    private suspend fun loadDailyProduction() {
-        try {
-            val realm = app.getRealmInstance()
-
-            // Get all non-deleted gathers
-            val gathers = realm.query<Gather>("isDeleted == false").find()
-
-            // Calculate the start of 7 days ago
-            val calendar = Calendar.getInstance()
-            calendar.add(Calendar.DAY_OF_YEAR, -6) // -6 to include today (7 days total)
-            calendar.set(Calendar.HOUR_OF_DAY, 0)
-            calendar.set(Calendar.MINUTE, 0)
-            calendar.set(Calendar.SECOND, 0)
-            calendar.set(Calendar.MILLISECOND, 0)
-            val startDate = calendar.timeInMillis
-
-            // Format for both parsing and display
-            val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-            val displayFormat = SimpleDateFormat("dd.MM", Locale.getDefault())
-
-            // Create a map for each day's production
-            val dailyMap = mutableMapOf<String, DailyProduction>()
-
-            // Initialize the map with the last 7 days
-            for (i in 0..6) {
-                val date = Calendar.getInstance()
-                date.timeInMillis = startDate
-                date.add(Calendar.DAY_OF_YEAR, i)
-
-                val displayDate = displayFormat.format(date.time)
-                val fullDateStr = dateFormat.format(date.time).substring(0, 10) // YYYY-MM-DD
-
-                dailyMap[fullDateStr] = DailyProduction(
-                    date = displayDate,
-                    fullDate = fullDateStr,
-                    totalPunnets = 0,
-                    totalEarnings = 0.0f
-                )
-            }
-
-            // Process gathers and group by day
-            for (gather in gathers) {
-                val dateTimeStr = gather.dateTime ?: continue
-
-                try {
-                    // Extract just the date part (YYYY-MM-DD)
-                    val datePart = dateTimeStr.substring(0, 10)
-
-                    // Only process if it's within our date range
-                    if (dailyMap.containsKey(datePart)) {
-                        val punnets = gather.numOfPunnets ?: 0
-                        val cost = gather.punnetCost ?: 0.0f
-                        val earnings = punnets * cost
-
-                        val current = dailyMap[datePart]!!
-                        dailyMap[datePart] = current.copy(
-                            totalPunnets = current.totalPunnets + punnets,
-                            totalEarnings = current.totalEarnings + earnings
-                        )
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error processing date: $dateTimeStr", e)
-                }
-            }
-
-            // Convert to ordered list for display
-            val dailyList = dailyMap.values.sortedBy { it.fullDate }
-
-            _dailyProduction.value = dailyList
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error loading daily production", e)
-            _errorMessage.value = "Помилка при завантаженні щоденних даних: ${e.message}"
         }
     }
 }
@@ -303,12 +306,12 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
 // Data classes for UI state
 
 data class SummaryStats(
-    val totalPunnets: Int,
-    val totalEarnings: Float,
-    val workerCount: Int,
-    val todayPunnets: Int,
-    val todayEarnings: Float,
-    val avgPunnetsPerWorker: Float
+    val totalTrays: Int,
+    val totalPaid: Float,
+    val avgWorkersPerDay: Float,
+    val todayTrays: Int,
+    val todayToPay: Float,
+    val activeWorkersToday: Int
 )
 
 data class WorkerStats(
@@ -316,12 +319,6 @@ data class WorkerStats(
     val workerName: String,
     val sequenceNumber: Int,
     val totalPunnets: Int,
-    val totalEarnings: Float
-)
-
-data class DailyProduction(
-    val date: String,  // Formatted date for display (e.g., "23.04")
-    val fullDate: String, // Full date for sorting (e.g., "2023-04-23")
-    val totalPunnets: Int,
-    val totalEarnings: Float
+    val totalEarnings: Float,
+    val avgPunnetsPerDay: Float
 )

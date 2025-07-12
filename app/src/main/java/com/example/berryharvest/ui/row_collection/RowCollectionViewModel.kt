@@ -335,6 +335,34 @@ class RowCollectionViewModel(application: Application) : AndroidViewModel(applic
     }
 
     /**
+     * Get worker history for a specific row number.
+     */
+    fun getRowWorkerHistory(rowNumber: Int, callback: (List<com.example.berryharvest.ui.gather.GatherWithDetails>) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val result = app.repositoryProvider.gatherRepository.getGatherHistoryByRowNumber(rowNumber)
+                when (result) {
+                    is Result.Success -> {
+                        callback(result.data)
+                    }
+                    is Result.Error -> {
+                        Log.e("RowCollectionViewModel", "Error getting worker history for row $rowNumber", result.exception)
+                        _error.value = "Помилка завантаження історії: ${result.message}"
+                        callback(emptyList())
+                    }
+                    is Result.Loading -> {
+                        // Loading state handled by caller
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("RowCollectionViewModel", "Error getting worker history for row $rowNumber", e)
+                _error.value = "Помилка завантаження історії: ${e.message}"
+                callback(emptyList())
+            }
+        }
+    }
+
+    /**
      * Clear any error message.
      */
     fun clearError() {

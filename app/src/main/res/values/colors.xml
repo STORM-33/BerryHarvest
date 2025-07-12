@@ -7,4 +7,17 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Text Colors -->
+    <color name="text_secondary">#666666</color>
+
+    <!-- Statistics Colors -->
+    <color name="success_color">#4CAF50</color>
+    <color name="warning_color">#FF9800</color>
+    <color name="info_color">#2196F3</color>
+    <color name="accent_color">#9C27B0</color>
+
+    <!-- Table Colors - Light Theme -->
+    <color name="table_header_background">#F5F5F5</color>
+    <color name="table_header_text">#424242</color>
 </resources>

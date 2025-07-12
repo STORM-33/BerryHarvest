@@ -2,10 +2,10 @@ package com.example.berryharvest.data.repository
 
 import android.app.Application
 import android.util.Log
+import com.example.berryharvest.NetworkConnectivityManager
 import com.example.berryharvest.data.model.Gather
 import com.example.berryharvest.data.model.PaymentBalance
 import com.example.berryharvest.data.model.PaymentRecord
-import com.example.berryharvest.data.network.EnhancedNetworkManager
 import io.realm.kotlin.MutableRealm
 import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
@@ -24,7 +24,7 @@ import java.util.UUID
  */
 class PaymentRepositoryImpl(
     application: Application,
-    networkManager: EnhancedNetworkManager,
+    networkManager: NetworkConnectivityManager,
     databaseTransactionManager: DatabaseTransactionManager
 ) : BaseRepositoryImpl<PaymentRecord>(
     application = application,

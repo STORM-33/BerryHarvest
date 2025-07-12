@@ -3,7 +3,7 @@ package com.example.berryharvest.data.repository
 import android.app.Application
 import android.util.Log
 import com.example.berryharvest.BerryHarvestApplication
-import com.example.berryharvest.data.network.EnhancedNetworkManager
+import com.example.berryharvest.NetworkConnectivityManager
 import io.realm.kotlin.MutableRealm
 import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
@@ -41,7 +41,7 @@ import kotlin.time.Duration.Companion.seconds
  */
 abstract class BaseRepositoryImpl<T : RealmObject>(
     protected val application: Application,
-    protected val networkManager: EnhancedNetworkManager,
+    protected val networkManager: NetworkConnectivityManager,
     protected val databaseTransactionManager: DatabaseTransactionManager,
     protected val entityType: String,
     protected val logTag: String

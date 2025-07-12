@@ -13,7 +13,8 @@ import com.example.berryharvest.R
 import com.example.berryharvest.data.model.Row
 
 class RowAdapter(
-    private val onRowClick: (Row) -> Unit
+    private val onRowClick: (Row) -> Unit,
+    private val onRowLongClick: (Row) -> Unit
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private var items = listOf<RowItem>()
@@ -130,7 +131,9 @@ class RowAdapter(
             // Set checkbox without triggering listener
             collectedCheckBox.setOnCheckedChangeListener(null)
             collectedCheckBox.isChecked = row.isCollected
-            collectedCheckBox.setOnCheckedChangeListener { _, _ ->
+
+            // Handle checkbox clicks - only toggle, don't interfere with long press
+            collectedCheckBox.setOnClickListener {
                 onRowClick(row)
             }
 
@@ -151,9 +154,31 @@ class RowAdapter(
             }
             itemView.setBackgroundColor(backgroundColor)
 
-            // Set click listener for entire row
-            itemView.setOnClickListener {
+            // Set click listener for the text area only (not the entire row)
+            rowNumberTextView.setOnClickListener {
                 onRowClick(row)
+            }
+
+            // Set long click listener for the entire row
+            itemView.setOnLongClickListener {
+                onRowLongClick(row)
+                true
+            }
+
+            // Also set long click on text view and checkbox to ensure it works
+            rowNumberTextView.setOnLongClickListener {
+                onRowLongClick(row)
+                true
+            }
+
+            collectedCheckBox.setOnLongClickListener {
+                onRowLongClick(row)
+                true
+            }
+
+            syncStatusIcon.setOnLongClickListener {
+                onRowLongClick(row)
+                true
             }
         }
     }

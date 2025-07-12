@@ -33,6 +33,7 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import com.example.berryharvest.data.model.Row
 import com.example.berryharvest.data.repository.RowExpirationManager
+import com.example.berryharvest.util.MemoryMonitor
 
 /**
  * Main application class responsible for initializing global dependencies
@@ -98,12 +99,19 @@ class BerryHarvestApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        // Test memory monitoring right away
+        MemoryMonitor.logMemoryUsage("AppStart")
+        Log.d("RealmTest", "Starting app - checking Realm instances")
+
         try {
             initializeApplication()
         } catch (e: Exception) {
             Log.e("BerryHarvestApp", "Error during application initialization", e)
             // Don't crash the app, but log the error
         }
+
+        MemoryMonitor.logMemoryUsage("AppInitialized")
+        Log.d("RealmTest", RealmManager.getInstanceReport())
     }
 
     private fun initializeApplication() {
@@ -426,6 +434,179 @@ class BerryHarvestApplication : Application() {
             Log.d("BerryHarvestApp", "Application shutdown completed")
         } catch (e: Exception) {
             Log.e("BerryHarvestApp", "Error during shutdown", e)
+        }
+    }
+
+    /**
+     * Comprehensive sync debugging tool
+     * This will tell us exactly what's wrong with sync
+     */
+    suspend fun debugRealmSync(): String {
+        val debugInfo = StringBuilder()
+
+        try {
+            debugInfo.appendLine("=== REALM SYNC DEBUG REPORT ===")
+            debugInfo.appendLine("Timestamp: ${System.currentTimeMillis()}")
+            debugInfo.appendLine()
+
+            // 1. Check App and User Status
+            debugInfo.appendLine("1. APP & USER STATUS:")
+            debugInfo.appendLine("App initialized: ${app != null}")
+
+            if (app != null) {
+                debugInfo.appendLine("App ID: ${app!!.configuration.appId}")
+                debugInfo.appendLine("Current user: ${app!!.currentUser != null}")
+
+                if (app!!.currentUser != null) {
+                    val user = app!!.currentUser!!
+                    debugInfo.appendLine("User ID: ${user.id}")
+                    debugInfo.appendLine("User state: ${user.state}")
+                    debugInfo.appendLine("User identity: ${user.identity}")
+                } else {
+                    debugInfo.appendLine("❌ NO CURRENT USER")
+                }
+            } else {
+                debugInfo.appendLine("❌ APP NOT INITIALIZED")
+            }
+            debugInfo.appendLine()
+
+            // 2. Check Network Status
+            debugInfo.appendLine("2. NETWORK STATUS:")
+            debugInfo.appendLine("Network available: ${networkStatusManager.isNetworkAvailable()}")
+            debugInfo.appendLine("Connection state: ${networkStatusManager.connectionState.value}")
+            debugInfo.appendLine()
+
+            // 3. Check Realm Instance
+            debugInfo.appendLine("3. REALM INSTANCE:")
+            try {
+                val realm = getRealmInstance("debug")
+                debugInfo.appendLine("Realm opened successfully: ${!realm.isClosed()}")
+                debugInfo.appendLine("Realm path: ${realm.configuration}")
+
+                // Check if it's a synced realm
+                val configString = realm.configuration.toString()
+                val isSyncedRealm = configString.contains("Sync", ignoreCase = true)
+                debugInfo.appendLine("Is synced realm: $isSyncedRealm")
+
+                if (isSyncedRealm) {
+                    // 4. Check Subscriptions
+                    debugInfo.appendLine()
+                    debugInfo.appendLine("4. SYNC SUBSCRIPTIONS:")
+                    debugInfo.appendLine("Total subscriptions: ${realm.subscriptions.size}")
+
+                    if (realm.subscriptions.size > 0) {
+                        debugInfo.appendLine("Subscription details:")
+                        realm.subscriptions.forEach { subscription ->
+                            debugInfo.appendLine("  - Name: ${subscription.name ?: "unnamed"}")
+                            debugInfo.appendLine("    Query: ${subscription.queryDescription}")
+                            debugInfo.appendLine("    Object type: ${subscription.objectType}")
+                        }
+
+                        // Try to check subscription state
+                        try {
+                            debugInfo.appendLine("Waiting for sync...")
+                            realm.subscriptions.waitForSynchronization(kotlin.time.Duration.parse("5s"))
+                            debugInfo.appendLine("✅ Subscriptions synchronized successfully")
+                        } catch (e: Exception) {
+                            debugInfo.appendLine("❌ Subscription sync failed: ${e.message}")
+                        }
+                    } else {
+                        debugInfo.appendLine("❌ NO SUBSCRIPTIONS FOUND")
+                    }
+
+                    // 5. Check Data Counts
+                    debugInfo.appendLine()
+                    debugInfo.appendLine("5. LOCAL DATA COUNTS:")
+                    try {
+                        val workerCount = realm.query<Worker>().count().find()
+                        val gatherCount = realm.query<Gather>().count().find()
+                        val assignmentCount = realm.query<Assignment>().count().find()
+                        val settingsCount = realm.query<Settings>().count().find()
+
+                        debugInfo.appendLine("Workers: $workerCount")
+                        debugInfo.appendLine("Gathers: $gatherCount")
+                        debugInfo.appendLine("Assignments: $assignmentCount")
+                        debugInfo.appendLine("Settings: $settingsCount")
+
+                        // Check unsynced counts
+                        val unsyncedWorkers = realm.query<Worker>("isSynced == false").count().find()
+                        val unsyncedGathers = realm.query<Gather>("isSynced == false").count().find()
+
+                        debugInfo.appendLine("Unsynced workers: $unsyncedWorkers")
+                        debugInfo.appendLine("Unsynced gathers: $unsyncedGathers")
+
+                    } catch (e: Exception) {
+                        debugInfo.appendLine("❌ Error counting data: ${e.message}")
+                    }
+                } else {
+                    debugInfo.appendLine("Using local-only Realm (no sync)")
+                }
+
+            } catch (e: Exception) {
+                debugInfo.appendLine("❌ Error opening Realm: ${e.message}")
+                debugInfo.appendLine("Exception: ${e.javaClass.simpleName}")
+                debugInfo.appendLine("Stack trace: ${e.stackTrace.take(3).joinToString()}")
+            }
+
+            // 6. Check Sync Manager
+            debugInfo.appendLine()
+            debugInfo.appendLine("6. SYNC MANAGER:")
+            if (::syncManager.isInitialized) {
+                debugInfo.appendLine("Sync manager initialized: true")
+                // Add sync manager status if available
+            } else {
+                debugInfo.appendLine("❌ Sync manager not initialized")
+            }
+
+            // 7. Check Repository Status
+            debugInfo.appendLine()
+            debugInfo.appendLine("7. REPOSITORY STATUS:")
+            try {
+                val workerRepo = repositoryProvider.workerRepository
+                debugInfo.appendLine("Worker repository pending ops: ${workerRepo.getPendingOperationsCount()}")
+                debugInfo.appendLine("Worker repository has pending: ${workerRepo.hasPendingOperations()}")
+            } catch (e: Exception) {
+                debugInfo.appendLine("❌ Error checking repositories: ${e.message}")
+            }
+
+            debugInfo.appendLine()
+            debugInfo.appendLine("=== END DEBUG REPORT ===")
+
+        } catch (e: Exception) {
+            debugInfo.appendLine("❌ CRITICAL ERROR IN DEBUG: ${e.message}")
+            debugInfo.appendLine("Exception: ${e.javaClass.simpleName}")
+        }
+
+        val report = debugInfo.toString()
+        Log.d("RealmSyncDebug", report)
+        return report
+    }
+
+    /**
+     * Quick sync status check
+     */
+    suspend fun getQuickSyncStatus(): String {
+        return try {
+            val hasApp = app != null
+            val hasUser = app?.currentUser != null
+            val userStateOk = app?.currentUser?.state?.name == "LOGGED_IN"
+            val networkOk = networkStatusManager.isNetworkAvailable()
+
+            val realm = getRealmInstance("quick_check")
+            val isSynced = realm.configuration.toString().contains("Sync", ignoreCase = true)
+            val hasSubscriptions = if (isSynced) realm.subscriptions.size > 0 else false
+
+            when {
+                !hasApp -> "❌ App not initialized"
+                !hasUser -> "❌ No user logged in"
+                !userStateOk -> "❌ User not logged in properly"
+                !networkOk -> "⚠️ Network unavailable"
+                !isSynced -> "ℹ️ Using local Realm (offline mode)"
+                !hasSubscriptions -> "❌ No sync subscriptions"
+                else -> "✅ Sync appears healthy"
+            }
+        } catch (e: Exception) {
+            "❌ Error: ${e.message}"
         }
     }
 

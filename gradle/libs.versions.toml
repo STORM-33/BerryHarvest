@@ -16,6 +16,8 @@ realm = "1.11.0"
 media3CommonKtx = "1.6.0"
 lifecycleProcess = "2.8.7"
 swiperefreshlayout = "1.1.0"
+testng = "6.9.6"
+junitKtx = "1.2.1"
 
 [libraries]
 realm-library-base = { module = "io.realm.kotlin:library-base", version.ref = "realm" }
@@ -33,6 +35,8 @@ androidx-navigation-ui-ktx = { group = "androidx.navigation", name = "navigation
 androidx-media3-common-ktx = { group = "androidx.media3", name = "media3-common-ktx", version.ref = "media3CommonKtx" }
 androidx-lifecycle-process = { group = "androidx.lifecycle", name = "lifecycle-process", version.ref = "lifecycleProcess" }
 androidx-swiperefreshlayout = { group = "androidx.swiperefreshlayout", name = "swiperefreshlayout", version.ref = "swiperefreshlayout" }
+testng = { group = "org.testng", name = "testng", version.ref = "testng" }
+androidx-junit-ktx = { group = "androidx.test.ext", name = "junit-ktx", version.ref = "junitKtx" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -1,6 +1,7 @@
 package com.example.berryharvest.ui.report
 
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -28,16 +29,12 @@ class ReportFragment : BaseFragment() {
     private lateinit var loadingProgressBar: ProgressBar
 
     // Summary stats views
-    private lateinit var totalPunnetsTextView: TextView
-    private lateinit var totalEarningsTextView: TextView
-    private lateinit var workerCountTextView: TextView
-    private lateinit var todayPunnetsTextView: TextView
-    private lateinit var todayEarningsTextView: TextView
-    private lateinit var avgPunnetsPerWorkerTextView: TextView
-
-    // Daily production list
-    private lateinit var dailyProductionRecyclerView: RecyclerView
-    private lateinit var dailyProductionAdapter: DailyProductionAdapter
+    private lateinit var totalTraysTextView: TextView
+    private lateinit var totalPaidTextView: TextView
+    private lateinit var avgWorkersPerDayTextView: TextView
+    private lateinit var todayTraysTextView: TextView
+    private lateinit var todayToPayTextView: TextView
+    private lateinit var activeWorkersTodayTextView: TextView
 
     // Worker stats
     private lateinit var workerStatsRecyclerView: RecyclerView
@@ -56,18 +53,12 @@ class ReportFragment : BaseFragment() {
         loadingProgressBar = root.findViewById(R.id.loadingProgressBar)
 
         // Initialize summary views
-        totalPunnetsTextView = root.findViewById(R.id.totalPunnetsTextView)
-        totalEarningsTextView = root.findViewById(R.id.totalEarningsTextView)
-        workerCountTextView = root.findViewById(R.id.workerCountTextView)
-        todayPunnetsTextView = root.findViewById(R.id.todayPunnetsTextView)
-        todayEarningsTextView = root.findViewById(R.id.todayEarningsTextView)
-        avgPunnetsPerWorkerTextView = root.findViewById(R.id.avgPunnetsPerWorkerTextView)
-
-        // Initialize daily production recycler view
-        dailyProductionRecyclerView = root.findViewById(R.id.dailyProductionRecyclerView)
-        dailyProductionAdapter = DailyProductionAdapter()
-        dailyProductionRecyclerView.adapter = dailyProductionAdapter
-        dailyProductionRecyclerView.layoutManager = LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
+        totalTraysTextView = root.findViewById(R.id.totalTraysTextView)
+        totalPaidTextView = root.findViewById(R.id.totalPaidTextView)
+        avgWorkersPerDayTextView = root.findViewById(R.id.avgWorkersPerDayTextView)
+        todayTraysTextView = root.findViewById(R.id.todayTraysTextView)
+        todayToPayTextView = root.findViewById(R.id.todayToPayTextView)
+        activeWorkersTodayTextView = root.findViewById(R.id.activeWorkersTodayTextView)
 
         // Initialize worker stats recycler view
         workerStatsRecyclerView = root.findViewById(R.id.workerStatsRecyclerView)
@@ -79,6 +70,14 @@ class ReportFragment : BaseFragment() {
         setupObservers()
 
         return root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        setupObservers()
+        lifecycleScope.launch {
+            viewModel.loadReportData()
+        }
     }
 
     private fun setupUI() {
@@ -118,15 +117,8 @@ class ReportFragment : BaseFragment() {
 
         // Observe worker stats
         launchWhenStarted("worker-stats") {
-            viewModel.topWorkers.collect { workers ->
+            viewModel.workerStats.collect { workers ->
                 updateWorkerStats(workers)
-            }
-        }
-
-        // Observe daily production
-        launchWhenStarted("daily-production") {
-            viewModel.dailyProduction.collect { production ->
-                updateDailyProduction(production)
             }
         }
     }
@@ -138,20 +130,18 @@ class ReportFragment : BaseFragment() {
         }
 
         // Update all summary text views with the data
-        totalPunnetsTextView.text = "${stats.totalPunnets}"
-        totalEarningsTextView.text = String.format(Locale.getDefault(), "%.2f₴", stats.totalEarnings)
-        workerCountTextView.text = "${stats.workerCount}"
-        todayPunnetsTextView.text = "${stats.todayPunnets}"
-        todayEarningsTextView.text = String.format(Locale.getDefault(), "%.2f₴", stats.todayEarnings)
-        avgPunnetsPerWorkerTextView.text = String.format(Locale.getDefault(), "%.1f", stats.avgPunnetsPerWorker)
+        totalTraysTextView.text = "${stats.totalTrays}"
+        totalPaidTextView.text = String.format(Locale.getDefault(), "%.2f₴", stats.totalPaid)
+        avgWorkersPerDayTextView.text = String.format(Locale.getDefault(), "%.1f", stats.avgWorkersPerDay)
+        todayTraysTextView.text = "${stats.todayTrays}"
+        todayToPayTextView.text = String.format(Locale.getDefault(), "%.2f₴", stats.todayToPay)
+        activeWorkersTodayTextView.text = "${stats.activeWorkersToday}"
     }
 
     private fun updateWorkerStats(workers: List<WorkerStats>) {
-        workerStatsAdapter.submitList(workers)
-    }
-
-    private fun updateDailyProduction(production: List<DailyProduction>) {
-        dailyProductionAdapter.submitList(production)
+        // Limit to top 9 workers
+        val topWorkers = workers.take(9)
+        workerStatsAdapter.submitList(topWorkers)
     }
 
     private fun refreshData() {
@@ -159,7 +149,7 @@ class ReportFragment : BaseFragment() {
     }
 }
 
-// Worker stats adapter - simplified version without "top workers" concept
+// Fixed Worker stats adapter with proper rankings and TextView binding
 class WorkerStatsAdapter :
     androidx.recyclerview.widget.ListAdapter<WorkerStats, WorkerStatsAdapter.ViewHolder>(
         object : androidx.recyclerview.widget.DiffUtil.ItemCallback<WorkerStats>() {
@@ -174,10 +164,10 @@ class WorkerStatsAdapter :
     ) {
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-        val nameTextView: TextView = view.findViewById(R.id.workerNameTextView)
-        val punnetsTextView: TextView = view.findViewById(R.id.workerPunnetsTextView)
-        val earningsTextView: TextView = view.findViewById(R.id.workerEarningsTextView)
         val rankTextView: TextView = view.findViewById(R.id.rankTextView)
+        val nameTextView: TextView = view.findViewById(R.id.workerNameTextView)
+        val totalPunnetsTextView: TextView = view.findViewById(R.id.workerPunnetsTextView)
+        val avgPunnetsTextView: TextView = view.findViewById(R.id.workerAvgTextView)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -188,42 +178,27 @@ class WorkerStatsAdapter :
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = getItem(position)
-        holder.rankTextView.text = "#${position + 1}"
-        holder.nameTextView.text = "${item.workerName} [${item.sequenceNumber}]"
-        holder.punnetsTextView.text = "${item.totalPunnets}"
-        holder.earningsTextView.text = String.format(Locale.getDefault(), "%.2f₴", item.totalEarnings)
-    }
-}
+        val rank = position + 1
 
-class DailyProductionAdapter :
-    androidx.recyclerview.widget.ListAdapter<DailyProduction, DailyProductionAdapter.ViewHolder>(
-        object : androidx.recyclerview.widget.DiffUtil.ItemCallback<DailyProduction>() {
-            override fun areItemsTheSame(oldItem: DailyProduction, newItem: DailyProduction): Boolean {
-                return oldItem.fullDate == newItem.fullDate
-            }
-
-            override fun areContentsTheSame(oldItem: DailyProduction, newItem: DailyProduction): Boolean {
-                return oldItem == newItem
-            }
+        // Set proper rank with medal emojis for top performers
+        holder.rankTextView.text = when (rank) {
+            1 -> "🥇"  // Gold medal for 1st place
+            2 -> "🥈"  // Silver medal for 2nd place
+            3 -> "🥉"  // Bronze medal for 3rd place
+            else -> "$rank"  // Regular number for others
         }
-    ) {
 
-    class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
-        val dateTextView: TextView = view.findViewById(R.id.dateTextView)
-        val punnetsTextView: TextView = view.findViewById(R.id.punnetsTextView)
-        val earningsTextView: TextView = view.findViewById(R.id.earningsTextView)
-    }
+        // Worker name with sequence number
+        holder.nameTextView.text = "${item.workerName} [${item.sequenceNumber}]"
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_daily_production, parent, false)
-        return ViewHolder(view)
-    }
+        // Total punnets
+        holder.totalPunnetsTextView.text = "${item.totalPunnets}"
 
-    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val item = getItem(position)
-        holder.dateTextView.text = item.date
-        holder.punnetsTextView.text = "${item.totalPunnets}"
-        holder.earningsTextView.text = String.format(Locale.getDefault(), "%.2f₴", item.totalEarnings)
+        // Average punnets per day (with /д suffix)
+        holder.avgPunnetsTextView.text = String.format(
+            Locale.getDefault(),
+            "%.1f/д",
+            item.avgPunnetsPerDay
+        )
     }
 }

@@ -18,6 +18,7 @@ import kotlinx.coroutines.withTimeout
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.seconds
 import com.example.berryharvest.data.model.Row
+import com.example.berryharvest.util.MemoryMonitor
 
 /**
  * Manages Realm instances in a coroutine-friendly way.
@@ -25,6 +26,85 @@ import com.example.berryharvest.data.model.Row
  * for use with Kotlin coroutines.
  */
 class RealmManager(private val application: BerryHarvestApplication) {
+    companion object {
+        private val activeInstances = mutableMapOf<String, Realm>()
+        private val instanceCreationTimes = mutableMapOf<String, Long>()
+        private val instanceCreationStacks = mutableMapOf<String, String>()
+
+        fun trackInstance(key: String, realm: Realm) {
+            activeInstances[key] = realm
+            instanceCreationTimes[key] = System.currentTimeMillis()
+
+            // Capture stack trace to see where instance was created
+            val stackTrace = Thread.currentThread().stackTrace.take(10).joinToString("\n") {
+                "  at ${it.className}.${it.methodName}(${it.fileName}:${it.lineNumber})"
+            }
+            instanceCreationStacks[key] = stackTrace
+
+            Log.d("RealmTracker", "📊 Active Realm instances: ${activeInstances.size}")
+            Log.d("RealmTracker", "📝 New instance: $key")
+            MemoryMonitor.logMemoryUsage("RealmCreated-$key")
+        }
+
+        fun removeInstance(key: String) {
+            activeInstances.remove(key)
+            instanceCreationTimes.remove(key)
+            instanceCreationStacks.remove(key)
+            Log.d("RealmTracker", "📊 Active Realm instances: ${activeInstances.size} (removed $key)")
+            MemoryMonitor.logMemoryUsage("RealmRemoved-$key")
+        }
+
+        fun getInstanceReport(): String {
+            return buildString {
+                appendLine("=== REALM INSTANCES REPORT ===")
+                appendLine("Total Active: ${activeInstances.size}")
+                appendLine("Expected Maximum: 1-2 (ideal)")
+                if (activeInstances.size > 2) {
+                    appendLine("⚠️ WARNING: Too many instances detected!")
+                }
+                appendLine()
+
+                activeInstances.forEach { (key, realm) ->
+                    val age = System.currentTimeMillis() - (instanceCreationTimes[key] ?: 0)
+                    val isOpen = !realm.isClosed()
+                    val status = if (isOpen) "OPEN" else "CLOSED"
+
+                    appendLine("Instance: $key")
+                    appendLine("  Status: $status")
+                    appendLine("  Age: ${age/1000}s")
+                    appendLine("  Created at:")
+                    val stack = instanceCreationStacks[key] ?: "Unknown"
+                    appendLine(stack.split("\n").take(3).joinToString("\n"))
+                    appendLine()
+                }
+
+                appendLine("Memory Info: ${MemoryMonitor.getSimpleMemoryInfo()}")
+            }
+        }
+
+        fun getActiveInstanceCount(): Int = activeInstances.size
+
+        fun getInstanceKeys(): Set<String> = activeInstances.keys.toSet()
+
+        // Force close all instances (for emergency cleanup)
+        fun closeAllInstances() {
+            Log.w("RealmTracker", "🚨 FORCE CLOSING ALL REALM INSTANCES")
+            activeInstances.values.forEach { realm ->
+                try {
+                    if (!realm.isClosed()) {
+                        realm.close()
+                    }
+                } catch (e: Exception) {
+                    Log.e("RealmTracker", "Error closing realm", e)
+                }
+            }
+            activeInstances.clear()
+            instanceCreationTimes.clear()
+            instanceCreationStacks.clear()
+            MemoryMonitor.logMemoryUsage("AllRealmsClosed")
+        }
+    }
+
     private val TAG = "RealmManager"
 
     // Map to store Realm instances by context key
@@ -66,6 +146,7 @@ class RealmManager(private val application: BerryHarvestApplication) {
             // Instance exists but is closed, remove it safely
             Log.d(TAG, "Removing closed Realm instance for context: $contextKey")
             instances.remove(contextKey)
+            removeInstance(contextKey) // ADD THIS LINE
         }
 
         // Create a new instance with thread safety
@@ -76,6 +157,7 @@ class RealmManager(private val application: BerryHarvestApplication) {
                     return@withLock realm
                 }
                 instances.remove(contextKey)
+                removeInstance(contextKey) // ADD THIS LINE
             }
 
             Log.d(TAG, "Creating new Realm instance for context: $contextKey")
@@ -87,11 +169,13 @@ class RealmManager(private val application: BerryHarvestApplication) {
 
                 // Store the new instance
                 instances[contextKey] = newRealm
+                trackInstance(contextKey, newRealm) // ADD THIS LINE
                 newRealm
             } catch (e: Exception) {
                 Log.e(TAG, "Error creating Realm instance", e)
                 val fallbackRealm = createFallbackRealmInstance()
                 instances[contextKey] = fallbackRealm
+                trackInstance(contextKey, fallbackRealm) // ADD THIS LINE
                 fallbackRealm
             }
         }
@@ -195,6 +279,7 @@ class RealmManager(private val application: BerryHarvestApplication) {
      */
     fun closeInstance(contextKey: String) {
         val realm = instances.remove(contextKey)
+        removeInstance(contextKey) // ADD THIS LINE
         closeRealmSafely(realm, contextKey)
     }
 
@@ -222,6 +307,9 @@ class RealmManager(private val application: BerryHarvestApplication) {
         val currentInstances = instances.toMap()
         instances.clear()
 
+        // Clear tracking data
+        Companion.closeAllInstances() // ADD THIS LINE
+
         // Close all instances
         currentInstances.forEach { (key, realm) ->
             closeRealmSafely(realm, key)
@@ -247,6 +335,7 @@ class RealmManager(private val application: BerryHarvestApplication) {
                 try {
                     if (realm == null || realm.isClosed() || aggressive) {
                         instances.remove(key)
+                        removeInstance(key) // ADD THIS LINE
                         if (realm != null && !realm.isClosed()) {
                             realm.close()
                         }
@@ -256,6 +345,7 @@ class RealmManager(private val application: BerryHarvestApplication) {
                     Log.e(TAG, "Error closing Realm during cleanup for key: $key", e)
                     // Remove from map even if close failed to prevent accumulation
                     instances.remove(key)
+                    removeInstance(key) // ADD THIS LINE
                     closedCount++
                 }
             }

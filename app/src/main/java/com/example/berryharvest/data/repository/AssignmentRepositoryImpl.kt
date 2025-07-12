@@ -2,8 +2,8 @@ package com.example.berryharvest.data.repository
 
 import android.app.Application
 import android.util.Log
+import com.example.berryharvest.NetworkConnectivityManager
 import com.example.berryharvest.data.model.Assignment
-import com.example.berryharvest.data.network.EnhancedNetworkManager
 import com.example.berryharvest.ui.assign_rows.AssignmentGroup
 import io.realm.kotlin.MutableRealm
 import io.realm.kotlin.Realm
@@ -21,7 +21,7 @@ import java.util.UUID
  */
 class AssignmentRepositoryImpl(
     application: Application,
-    networkManager: EnhancedNetworkManager,
+    networkManager: NetworkConnectivityManager,
     databaseTransactionManager: DatabaseTransactionManager
 ) : BaseRepositoryImpl<Assignment>(
     application = application,

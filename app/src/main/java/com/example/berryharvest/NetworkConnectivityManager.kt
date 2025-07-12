@@ -18,13 +18,14 @@ class NetworkConnectivityManager(private val context: Context) {
     // Store the callback to avoid garbage collection
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
+    // Store external callbacks
+    private val externalCallbacks = mutableListOf<(Boolean) -> Unit>()
+
     init {
         // Initialize with current state
         updateConnectionState()
-        // Register for network changes
-        registerNetworkCallback { isAvailable ->
-            Log.d("Network", "Network state changed: $isAvailable")
-        }
+        // DON'T register a callback here - let NetworkStatusManager do it
+        Log.d("Network", "NetworkConnectivityManager initialized")
     }
 
     fun isNetworkAvailable(): Boolean {
@@ -60,42 +61,69 @@ class NetworkConnectivityManager(private val context: Context) {
     }
 
     fun registerNetworkCallback(callback: (Boolean) -> Unit) {
+        // Add to external callbacks list
+        externalCallbacks.add(callback)
+
+        // Only register system callback if this is the first external callback
+        if (externalCallbacks.size == 1) {
+            registerSystemCallback()
+        }
+
+        Log.d("Network", "Registered callback. Total callbacks: ${externalCallbacks.size}")
+    }
+
+    private fun registerSystemCallback() {
         // Unregister previous callback if exists
-        unregisterCallback()
+        unregisterSystemCallback()
 
         // Create new callback
         networkCallback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                Log.d("Network", "Network available")
+                Log.d("Network", "System callback: Network available")
                 _connectionState.value = ConnectionState.Connected
-                callback(true)
+                // Notify all external callbacks
+                externalCallbacks.forEach { it(true) }
             }
 
             override fun onLost(network: Network) {
-                Log.d("Network", "Network lost")
+                Log.d("Network", "System callback: Network lost")
                 _connectionState.value = ConnectionState.Disconnected
-                callback(false)
+                // Notify all external callbacks
+                externalCallbacks.forEach { it(false) }
             }
         }
 
-        // Register the callback
+        // Register the callback with the system
         try {
             connectivityManager.registerDefaultNetworkCallback(networkCallback!!)
+            Log.d("Network", "✅ System network callback registered")
         } catch (e: Exception) {
-            Log.e("Network", "Error registering network callback", e)
+            Log.e("Network", "❌ Error registering network callback", e)
             _connectionState.value = ConnectionState.Error("Failed to monitor network state: ${e.message}")
         }
     }
 
-    private fun unregisterCallback() {
+    private fun unregisterSystemCallback() {
         networkCallback?.let {
             try {
                 connectivityManager.unregisterNetworkCallback(it)
+                Log.d("Network", "System network callback unregistered")
             } catch (e: Exception) {
                 Log.e("Network", "Error unregistering network callback", e)
             }
         }
         networkCallback = null
+    }
+
+    fun unregisterNetworkCallback(callback: (Boolean) -> Unit) {
+        externalCallbacks.remove(callback)
+
+        // If no more external callbacks, unregister system callback
+        if (externalCallbacks.isEmpty()) {
+            unregisterSystemCallback()
+        }
+
+        Log.d("Network", "Unregistered callback. Remaining callbacks: ${externalCallbacks.size}")
     }
 
     fun getConnectionStateForDisplay(): String {
@@ -112,5 +140,12 @@ class NetworkConnectivityManager(private val context: Context) {
             is ConnectionState.Disconnected -> context.getColor(android.R.color.holo_orange_dark)
             is ConnectionState.Error -> context.getColor(android.R.color.holo_red_dark)
         }
+    }
+
+    // Cleanup method
+    fun cleanup() {
+        externalCallbacks.clear()
+        unregisterSystemCallback()
+        Log.d("Network", "NetworkConnectivityManager cleaned up")
     }
 }

@@ -5,4 +5,31 @@
     <dimen name="nav_header_vertical_spacing">8dp</dimen>
     <dimen name="nav_header_height">176dp</dimen>
     <dimen name="fab_margin">16dp</dimen>
+
+    <!-- Margins and Padding -->
+    <dimen name="card_margin">16dp</dimen>
+    <dimen name="card_padding">16dp</dimen>
+    <dimen name="small_margin">8dp</dimen>
+    <dimen name="section_title_margin">16dp</dimen>
+    <dimen name="stats_row_margin">12dp</dimen>
+    <dimen name="stats_item_padding">8dp</dimen>
+    <dimen name="stats_value_margin">4dp</dimen>
+    <dimen name="table_cell_padding">8dp</dimen>
+
+    <!-- Card Properties -->
+    <dimen name="card_corner_radius">8dp</dimen>
+    <dimen name="card_elevation">4dp</dimen>
+
+    <!-- Text Sizes -->
+    <dimen name="section_title_text_size">18sp</dimen>
+    <dimen name="stats_label_text_size">14sp</dimen>
+    <dimen name="caption_text_size">12sp</dimen>
+    <dimen name="table_header_text_size">14sp</dimen>
+
+    <!-- Table Column Widths -->
+    <dimen name="table_number_column_width">48dp</dimen>
+    <dimen name="table_name_column_width">140dp</dimen>
+    <dimen name="table_total_column_width">100dp</dimen>
+    <dimen name="table_average_column_width">120dp</dimen>
+    <dimen name="table_min_width">400dp</dimen>
 </resources>

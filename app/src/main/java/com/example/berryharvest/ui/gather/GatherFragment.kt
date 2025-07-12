@@ -33,6 +33,10 @@ import com.google.zxing.integration.android.IntentIntegrator
 import io.realm.kotlin.ext.query
 import kotlinx.coroutines.launch
 import java.util.Locale
+import com.example.berryharvest.ui.common.SearchableSpinnerView
+import com.example.berryharvest.ui.common.toSearchableItem
+import com.example.berryharvest.ui.common.toSearchableItem
+import kotlinx.coroutines.flow.first
 
 class GatherFragment : BaseFragment() {
     private lateinit var viewModel: GatherViewModel
@@ -563,21 +567,90 @@ class GatherFragment : BaseFragment() {
         val punnetsEditText: EditText = dialogView.findViewById(R.id.punnetsEditText)
         val priceTextView: TextView = dialogView.findViewById(R.id.priceTextView)
 
+        // Create a SearchableSpinnerView for worker selection
+        val workerSpinner = SearchableSpinnerView(requireContext())
+
+        // Hide the worker name text view and add the spinner in its place
         workerNameTextView.visibility = View.GONE
+
+        // Add the spinner to the dialog layout
+        val parentLayout = workerNameTextView.parent as ViewGroup
+        val index = parentLayout.indexOfChild(workerNameTextView)
+        parentLayout.addView(workerSpinner, index)
+
+        // Hide row number initially (will show when worker is selected)
         rowNumberTextView.visibility = View.GONE
 
         val formattedPrice = String.format(Locale.getDefault(), "%.2f", viewModel.punnetPrice.value)
         priceTextView.text = "Ціна за пінетку: $formattedPrice₴"
+        punnetsEditText.setText("10") // Default value
 
-        AlertDialog.Builder(requireContext())
-            .setTitle("Ручне введення")
-            .setMessage("Введіть кількість пінеток:")
+        // Variables to store selected worker and assignment info
+        var selectedWorker: Worker? = null
+        var selectedRowNumber: Int? = null
+
+        // Load workers and setup spinner
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                // Get all active workers from repository
+                when (val result = app.repositoryProvider.workerRepository.getAll().first()) {
+                    is com.example.berryharvest.data.repository.Result.Success -> {
+                        val workers = result.data.filter { !it.isDeleted } // Only show active workers
+
+                        if (workers.isEmpty()) {
+                            Toast.makeText(requireContext(), "Немає доступних працівників", Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+
+                        // Convert workers to searchable items
+                        val searchableWorkers = workers.map { it.toSearchableItem() }
+
+                        // Setup the spinner
+                        workerSpinner.setAdapter(searchableWorkers)
+                        workerSpinner.setOnItemSelectedListener { selectedItem ->
+                            val workerItem = selectedItem as com.example.berryharvest.ui.common.WorkerSearchableItem
+                            selectedWorker = workerItem.worker
+
+                            // Check worker assignment and show row info
+                            checkWorkerAssignmentAndUpdateDialog(
+                                workerItem.worker,
+                                rowNumberTextView
+                            ) { rowNumber ->
+                                selectedRowNumber = rowNumber
+                            }
+                        }
+                    }
+                    is com.example.berryharvest.data.repository.Result.Error -> {
+                        Toast.makeText(requireContext(), "Помилка завантаження працівників: ${result.message}", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                    else -> {
+                        Toast.makeText(requireContext(), "Завантаження працівників...", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                }
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), "Помилка: ${e.message}", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+        }
+
+        val dialog = AlertDialog.Builder(requireContext())
+            .setTitle("Ручне введення збору")
             .setView(dialogView)
-            .setPositiveButton("Далі") { _, _ ->
+            .setPositiveButton("Зберегти") { _, _ ->
+                val worker = selectedWorker
+                val rowNumber = selectedRowNumber
                 val numOfPunnetsText = punnetsEditText.text.toString()
                 val numOfPunnets = numOfPunnetsText.toIntOrNull()
 
                 when {
+                    worker == null -> {
+                        Toast.makeText(activity, "Оберіть працівника", Toast.LENGTH_SHORT).show()
+                    }
+                    rowNumber == null -> {
+                        Toast.makeText(activity, "Працівник не призначений на ряд", Toast.LENGTH_SHORT).show()
+                    }
                     numOfPunnetsText.isBlank() -> {
                         Toast.makeText(activity, "Введіть кількість пінеток", Toast.LENGTH_SHORT).show()
                     }
@@ -588,19 +661,65 @@ class GatherFragment : BaseFragment() {
                         Toast.makeText(activity, "Кількість пінеток повинна бути більше 0", Toast.LENGTH_SHORT).show()
                     }
                     else -> {
-                        AlertDialog.Builder(requireContext())
-                            .setTitle("Вибір працівника")
-                            .setMessage("Для вибору працівника відскануйте його QR-код")
-                            .setPositiveButton("Сканувати") { _, _ ->
-                                startScanner()
-                            }
-                            .setNegativeButton("Скасувати", null)
-                            .show()
+                        // Save the gather data
+                        viewModel.saveGatherData(worker._id, rowNumber, numOfPunnets)
+                        Toast.makeText(activity, "Збір успішно додано", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
             .setNegativeButton("Скасувати", null)
-            .show()
+            .create()
+
+        // Handle dialog dismiss to cleanup spinner
+        dialog.setOnDismissListener {
+            workerSpinner.hideDropdownForced()
+        }
+
+        dialog.show()
+    }
+
+    /**
+     * Check worker assignment and update the dialog with row information
+     */
+    private fun checkWorkerAssignmentAndUpdateDialog(
+        worker: Worker,
+        rowNumberTextView: TextView,
+        onRowFound: (Int) -> Unit
+    ) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                // Check if worker has assignment
+                when (val assignmentResult = app.repositoryProvider.assignmentRepository.getWorkerAssignment(worker._id)) {
+                    is com.example.berryharvest.data.repository.Result.Success -> {
+                        val assignment = assignmentResult.data
+                        if (assignment != null && assignment.rowNumber != null) {
+                            // Worker has assignment
+                            rowNumberTextView.text = "Ряд: ${assignment.rowNumber}"
+                            rowNumberTextView.visibility = View.VISIBLE
+                            onRowFound(assignment.rowNumber!!)
+                        } else {
+                            // Worker has no assignment
+                            rowNumberTextView.text = "Працівник не призначений на ряд"
+                            rowNumberTextView.visibility = View.VISIBLE
+                            onRowFound(-1) // Indicate no assignment
+                        }
+                    }
+                    is com.example.berryharvest.data.repository.Result.Error -> {
+                        rowNumberTextView.text = "Помилка перевірки призначення"
+                        rowNumberTextView.visibility = View.VISIBLE
+                        Log.e("GatherFragment", "Error checking assignment: ${assignmentResult.message}")
+                    }
+                    else -> {
+                        rowNumberTextView.text = "Перевірка призначення..."
+                        rowNumberTextView.visibility = View.VISIBLE
+                    }
+                }
+            } catch (e: Exception) {
+                rowNumberTextView.text = "Помилка: ${e.message}"
+                rowNumberTextView.visibility = View.VISIBLE
+                Log.e("GatherFragment", "Error checking worker assignment", e)
+            }
+        }
     }
 
     private fun refreshData() {
