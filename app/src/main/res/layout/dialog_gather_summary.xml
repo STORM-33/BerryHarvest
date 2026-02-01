@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:gravity="center">
+
+    <!-- Worker Name -->
+    <TextView
+        android:id="@+id/workerNameSummaryTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Worker Name"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="@android:color/black"
+        android:layout_marginBottom="16dp"
+        android:gravity="center" />
+
+    <!-- Total Punnets for Today -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Зібрано сьогодні:"
+        android:textSize="16sp"
+        android:textColor="#666666"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:id="@+id/totalPunnetsTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="0 пінеток"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:textColor="#4CAF50"
+        android:layout_marginBottom="24dp" />
+
+    <!-- Close Button -->
+    <Button
+        android:id="@+id/closeSummaryButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="OK"
+        android:paddingHorizontal="32dp" />
+
+</LinearLayout>

@@ -3,13 +3,12 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginStart="0dp"
+    android:layout_marginStart="4dp"
     android:layout_marginTop="4dp"
-    android:layout_marginEnd="0dp"
+    android:layout_marginEnd="4dp"
     android:layout_marginBottom="4dp"
     app:cardCornerRadius="8dp"
-    app:cardElevation="2dp"
-    app:cardUseCompatPadding="false">
+    app:cardElevation="2dp">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -17,87 +16,99 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <!-- Top row: Rank + Name -->
+        <!-- Top row: Rank + Name + Sequence -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="8dp">
+            android:layout_marginBottom="12dp">
 
             <!-- Rank badge -->
             <TextView
                 android:id="@+id/rankTextView"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
                 android:text="#1"
-                android:textSize="12sp"
+                android:textSize="14sp"
                 android:textStyle="bold"
                 android:gravity="center"
                 android:background="@drawable/rounded_background"
                 android:backgroundTint="@color/accent_color"
                 android:textColor="@color/white"
-                android:layout_marginEnd="12dp"
-                android:includeFontPadding="false" />
+                android:layout_marginEnd="12dp" />
 
-            <!-- Worker name - full width available -->
+            <!-- Worker name - takes up most space -->
             <TextView
                 android:id="@+id/workerNameTextView"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Вовк Олена Олександрівна [123]"
+                android:text="Вовк Олена Олександрівна"
                 android:textSize="16sp"
                 android:textStyle="bold"
                 android:maxLines="2"
-                android:ellipsize="end"
-                android:lineSpacingExtra="2dp" />
+                android:ellipsize="end" />
+
+            <!-- Sequence number -->
+            <TextView
+                android:id="@+id/sequenceTextView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="№123"
+                android:textSize="14sp"
+                android:textColor="@color/text_secondary"
+                android:background="@drawable/rounded_background"
+                android:backgroundTint="@color/light_gray"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:layout_marginStart="8dp" />
+
         </LinearLayout>
 
-        <!-- Bottom row: Stats in a 2-column grid -->
+        <!-- Stats grid -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:orientation="horizontal">
 
-            <!-- Punnets stat -->
+            <!-- Total punnets -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:padding="8dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Пінетки"
+                    android:text="Пінеток"
                     android:textSize="12sp"
-                    android:textColor="@color/text_secondary"
-                    android:gravity="center" />
+                    android:textColor="@color/text_secondary" />
 
                 <TextView
-                    android:id="@+id/workerPunnetsTextView"
+                    android:id="@+id/totalPunnetsTextView"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="123"
+                    android:text="1234"
                     android:textSize="18sp"
                     android:textStyle="bold"
                     android:textColor="@color/success_color"
                     android:layout_marginTop="2dp" />
+
             </LinearLayout>
 
-            <!-- Average per day stat -->
+            <!-- Average per day -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:orientation="vertical"
                 android:gravity="center"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:padding="8dp">
 
                 <TextView
@@ -105,11 +116,10 @@
                     android:layout_height="wrap_content"
                     android:text="За день"
                     android:textSize="12sp"
-                    android:textColor="@color/text_secondary"
-                    android:gravity="center" />
+                    android:textColor="@color/text_secondary" />
 
                 <TextView
-                    android:id="@+id/workerAvgTextView"
+                    android:id="@+id/avgPunnetsTextView"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="12.3/д"
@@ -117,7 +127,39 @@
                     android:textStyle="bold"
                     android:textColor="@color/info_color"
                     android:layout_marginTop="2dp" />
+
             </LinearLayout>
+
+            <!-- Total earnings -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="8dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Заробіток"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_secondary" />
+
+                <TextView
+                    android:id="@+id/totalEarningsTextView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="1234.56₴"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/warning_color"
+                    android:layout_marginTop="2dp" />
+
+            </LinearLayout>
+
         </LinearLayout>
+
     </LinearLayout>
+
 </androidx.cardview.widget.CardView>

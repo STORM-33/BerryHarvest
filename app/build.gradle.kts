@@ -10,10 +10,10 @@ android {
 
     defaultConfig {
         applicationId = "com.example.berryharvest"
-        minSdk = 24
+        minSdk = 26  // Updated from 24 to 26 for Apache POI compatibility
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 6
+        versionName = "1.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -25,6 +25,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -47,6 +48,12 @@ android {
 }
 
 dependencies {
+    // Excel generation dependencies - Apache POI (requires minSdk 26+)
+    implementation("org.apache.poi:poi:5.2.3")
+    implementation("org.apache.poi:poi-ooxml:5.2.3")
+    implementation("org.apache.poi:poi-scratchpad:5.2.3")
+
+    // Existing dependencies
     implementation("com.itextpdf:itextpdf:5.5.13.3")
     implementation("com.google.zxing:core:3.5.1")
     implementation("pub.devrel:easypermissions:3.0.0")

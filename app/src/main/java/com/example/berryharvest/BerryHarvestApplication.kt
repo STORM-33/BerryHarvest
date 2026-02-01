@@ -195,6 +195,7 @@ class BerryHarvestApplication : Application() {
         add(realm.query<Settings>(), "settings")
         add(realm.query<PaymentRecord>(), "payment_records")
         add(realm.query<PaymentBalance>(), "payment_balances")
+        add(realm.query<Row>(), "rows")
     }
 
     /**
@@ -251,6 +252,11 @@ class BerryHarvestApplication : Application() {
                     if (!subscriptionNames.contains("payment_balances")) {
                         add(realm.query<PaymentBalance>(), "payment_balances")
                         Log.d("Realm", "Added missing 'payment_balances' subscription")
+                    }
+
+                    if (!subscriptionNames.contains("rows")) {
+                        add(realm.query<Row>(), "rows")
+                        Log.d("Realm", "Added missing 'rows' subscription")
                     }
                 }
             } else {

@@ -10,12 +10,19 @@
 
     <!-- Text Colors -->
     <color name="text_secondary">#666666</color>
+    <color name="text_primary">@android:color/black</color>
 
     <!-- Statistics Colors -->
     <color name="success_color">#4CAF50</color>
     <color name="warning_color">#FF9800</color>
     <color name="info_color">#2196F3</color>
     <color name="accent_color">#9C27B0</color>
+    <color name="light_gray">#F5F5F5</color>
+
+    <!-- Background Colors -->
+    <color name="card_background">@android:color/white</color>
+    <color name="surface_background">#F8F9FA</color>
+    <color name="gather_item_background">@android:color/transparent</color>
 
     <!-- Table Colors - Light Theme -->
     <color name="table_header_background">#F5F5F5</color>

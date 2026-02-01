@@ -42,6 +42,8 @@ import io.realm.kotlin.ext.query
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
+import com.example.berryharvest.util.DataExportUtility
+import com.example.berryharvest.util.ExportResult
 
 class MainActivity : AppCompatActivity() {
 
@@ -81,6 +83,8 @@ class MainActivity : AppCompatActivity() {
         )
         setupActionBarWithNavController(navController, appBarConfiguration)
         navView.setupWithNavController(navController)
+
+        setupVersionDisplay()
 
         // Setup enhanced back press handling
         setupBackPressHandling(drawerLayout)
@@ -396,6 +400,14 @@ class MainActivity : AppCompatActivity() {
                 handleGenerateBadges()
                 true
             }
+            R.id.action_export_db -> {
+                handleDataExport()
+                true
+            }
+            R.id.action_export_excel -> {
+                handleExcelExport()
+                true
+            }
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -420,23 +432,7 @@ class MainActivity : AppCompatActivity() {
                 showPunnetPriceUpdateDialog()
             }
             .setNegativeButton("Ні") { _, _ ->
-                // If user doesn't want to save, ask if they want to delete assignments
-                showDeleteAssignmentsConfirmation()
-            }
-            .show()
-    }
-
-    private fun showDeleteAssignmentsConfirmation() {
-        AlertDialog.Builder(this)
-            .setTitle("Видалення призначень")
-            .setMessage("Бажаєте видалити всі поточні призначення на рядки?")
-            .setPositiveButton("Так") { _, _ ->
-                // User confirmed deletion
                 deleteAllAssignments()
-            }
-            .setNegativeButton("Ні") { _, _ ->
-                // Skip deletion and proceed to next step
-                showPunnetPriceUpdateDialog()
             }
             .show()
     }
@@ -850,6 +846,270 @@ class MainActivity : AppCompatActivity() {
                 syncSnackbar?.dismiss()
                 syncSnackbar = null
             }
+        }
+    }
+
+    private fun handleDataExport() {
+        AlertDialog.Builder(this)
+            .setTitle("Експорт бази даних")
+            .setMessage("Експортувати всі дані до JSON файлу?")
+            .setPositiveButton("Експортувати") { _, _ ->
+                performDataExport()
+            }
+            .setNegativeButton("Скасувати", null)
+            .show()
+    }
+
+    private fun performDataExport() {
+        val progressDialog = AlertDialog.Builder(this)
+            .setTitle("Експорт даних")
+            .setMessage("Створення резервної копії...")
+            .setCancelable(false)
+            .create()
+
+        progressDialog.show()
+
+        lifecycleScope.launch {
+            try {
+                val exportUtility = DataExportUtility(this@MainActivity)
+                val result = exportUtility.exportAllData()
+
+                withContext(Dispatchers.Main) {
+                    progressDialog.dismiss()
+
+                    when (result) {
+                        is ExportResult.Success -> {
+                            val totalRecords = result.results.values.sum()
+                            val message = buildString {
+                                appendLine("Експорт успішно завершено!")
+                                appendLine("Файл: ${result.exportFile.name}")
+                                appendLine("Розташування: ${result.exportFile.parent}")
+                                appendLine("Всього записів: $totalRecords")
+                                appendLine()
+                                result.results.forEach { (table, count) ->
+                                    val tableName = when(table) {
+                                        "workers" -> "Працівники"
+                                        "gathers" -> "Збори"
+                                        "assignments" -> "Призначення"
+                                        "settings" -> "Налаштування"
+                                        "payment_records" -> "Платежі"
+                                        "payment_balances" -> "Баланси"
+                                        "rows" -> "Рядки"
+                                        else -> table
+                                    }
+                                    appendLine("$tableName: $count")
+                                }
+                            }
+
+                            AlertDialog.Builder(this@MainActivity)
+                                .setTitle("Експорт завершено")
+                                .setMessage(message)
+                                .setPositiveButton("Відкрити папку") { _, _ ->
+                                    try {
+                                        val intent = Intent(Intent.ACTION_VIEW)
+                                        intent.setDataAndType(
+                                            Uri.parse(result.exportFile.parent),
+                                            "resource/folder"
+                                        )
+                                        startActivity(intent)
+                                    } catch (e: Exception) {
+                                        Toast.makeText(
+                                            this@MainActivity,
+                                            "Не вдається відкрити папку: ${e.message}",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                                .setNegativeButton("OK", null)
+                                .show()
+                        }
+                        is ExportResult.Error -> {
+                            AlertDialog.Builder(this@MainActivity)
+                                .setTitle("Помилка експорту")
+                                .setMessage(result.message)
+                                .setPositiveButton("OK", null)
+                                .show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    progressDialog.dismiss()
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Помилка експорту: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun setupVersionDisplay() {
+        try {
+            val packageInfo = packageManager.getPackageInfo(packageName, 0)
+            val versionName = packageInfo.versionName
+            val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                packageInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.versionCode.toLong()
+            }
+
+            // Find the version TextView in the navigation header
+            val navigationView = binding.navView
+            val headerView = navigationView.getHeaderView(0)
+            val versionTextView = headerView.findViewById<TextView>(R.id.versionTextView)
+
+            versionTextView?.text = "Версія $versionName ($versionCode)"
+
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error setting version display", e)
+            // Fallback to static version if there's an error
+            val navigationView = binding.navView
+            val headerView = navigationView.getHeaderView(0)
+            val versionTextView = headerView.findViewById<TextView>(R.id.versionTextView)
+            versionTextView?.text = "Версія 1.0"
+        }
+    }
+
+    private fun handleExcelExport() {
+        // Show confirmation dialog
+        AlertDialog.Builder(this)
+            .setTitle("Експорт Excel звіту")
+            .setMessage("Створити повний Excel звіт з усіма даними?")
+            .setPositiveButton("Експортувати") { _, _ ->
+                performExcelExport()
+            }
+            .setNegativeButton("Скасувати", null)
+            .show()
+    }
+
+    private fun performExcelExport() {
+        val progressDialog = AlertDialog.Builder(this)
+            .setTitle("Експорт Excel")
+            .setMessage("Створення Excel файлу...")
+            .setCancelable(false)
+            .create()
+
+        progressDialog.show()
+
+        lifecycleScope.launch {
+            try {
+                val excelGenerator = com.example.berryharvest.util.ExcelReportGenerator(this@MainActivity)
+
+                // Generate comprehensive report with ALL data (no date filtering)
+                val result = excelGenerator.generateComprehensiveReport()
+
+                progressDialog.dismiss()
+
+                when (result) {
+                    is com.example.berryharvest.util.ExcelGenerationResult.Success -> {
+                        showExcelExportSuccessDialog(result)
+                    }
+                    is com.example.berryharvest.util.ExcelGenerationResult.Error -> {
+                        showExcelExportErrorDialog("Помилка експорту", result.message)
+                    }
+                }
+
+            } catch (e: Exception) {
+                progressDialog.dismiss()
+                android.util.Log.e("MainActivity", "Error during Excel export", e)
+                showExcelExportErrorDialog("Помилка експорту", "Не вдалося створити Excel файл: ${e.message}")
+            }
+        }
+    }
+
+    private fun showExcelExportSuccessDialog(result: com.example.berryharvest.util.ExcelGenerationResult.Success) {
+        val message = buildString {
+            appendLine("Excel файл успішно створено!")
+            appendLine()
+            appendLine("Файл: ${result.file.name}")
+            appendLine("Розташування: ${result.file.parent}")
+            appendLine("Аркушів: ${result.sheetsGenerated}")
+            appendLine("Записів: ${result.totalRecords}")
+            appendLine()
+            appendLine("Розмір файлу: ${formatFileSize(result.file.length())}")
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Експорт завершено")
+            .setMessage(message)
+            .setPositiveButton("Відкрити") { _, _ ->
+                openExcelFile(result.file)
+            }
+            .setNeutralButton("Поділитися") { _, _ ->
+                shareExcelFile(result.file)
+            }
+            .setNegativeButton("Закрити", null)
+            .show()
+    }
+
+    private fun openExcelFile(file: java.io.File) {
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this,
+                "${packageName}.provider",
+                file
+            )
+
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            try {
+                startActivity(intent)
+            } catch (e: Exception) {
+                // If no Excel app is installed, try with generic viewer
+                val genericIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "*/*")
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(android.content.Intent.createChooser(genericIntent, "Відкрити файл"))
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error opening Excel file", e)
+            showExcelExportErrorDialog("Помилка відкриття", "Не вдалося відкрити файл: ${e.message}")
+        }
+    }
+
+    private fun shareExcelFile(file: java.io.File) {
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this,
+                "${packageName}.provider",
+                file
+            )
+
+            val shareIntent = android.content.Intent().apply {
+                action = android.content.Intent.ACTION_SEND
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+
+            startActivity(android.content.Intent.createChooser(shareIntent, "Поділитися звітом"))
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error sharing Excel file", e)
+            showExcelExportErrorDialog("Помилка", "Не вдалося поділитися файлом: ${e.message}")
+        }
+    }
+
+    private fun showExcelExportErrorDialog(title: String, message: String) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
+    private fun formatFileSize(bytes: Long): String {
+        return when {
+            bytes < 1024 -> "$bytes Б"
+            bytes < 1024 * 1024 -> "${bytes / 1024} КБ"
+            else -> String.format("%.1f МБ", bytes / (1024.0 * 1024.0))
         }
     }
 }

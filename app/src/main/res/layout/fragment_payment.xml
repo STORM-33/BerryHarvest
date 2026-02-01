@@ -20,7 +20,8 @@
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
             app:cardCornerRadius="8dp"
-            app:cardElevation="4dp">
+            app:cardElevation="4dp"
+            app:cardBackgroundColor="@color/card_background">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -34,6 +35,7 @@
                     android:text="Виберіть працівника для оплати:"
                     android:textSize="16sp"
                     android:textStyle="bold"
+                    android:textColor="@color/text_primary"
                     android:layout_marginBottom="8dp" />
 
                 <com.example.berryharvest.ui.common.SearchableSpinnerView
@@ -53,6 +55,7 @@
             android:visibility="gone"
             app:cardCornerRadius="8dp"
             app:cardElevation="4dp"
+            app:cardBackgroundColor="@color/card_background"
             tools:visibility="visible">
 
             <LinearLayout
@@ -68,93 +71,34 @@
                     android:layout_height="wrap_content"
                     android:textSize="18sp"
                     android:textStyle="bold"
+                    android:textColor="@color/text_primary"
                     android:layout_marginBottom="16dp"
                     tools:text="Іван Петренко [12]" />
 
-                <!-- Financial Summary Grid -->
+                <!-- Balance Display -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
+                    android:orientation="vertical"
+                    android:gravity="center"
                     android:layout_marginBottom="16dp">
 
-                    <!-- Total Earnings -->
-                    <LinearLayout
-                        android:layout_width="0dp"
+                    <TextView
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:gravity="center">
+                        android:text="Залишок до виплати"
+                        android:textSize="14sp"
+                        android:textColor="@color/text_secondary" />
 
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Загальний заробіток"
-                            android:textSize="12sp"
-                            android:textColor="#666666" />
-
-                        <TextView
-                            android:id="@+id/totalEarningsTextView"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:textSize="16sp"
-                            android:textColor="#4CAF50"
-                            android:textStyle="bold"
-                            android:layout_marginTop="4dp"
-                            tools:text="1250.50₴" />
-                    </LinearLayout>
-
-                    <!-- Total Payments -->
-                    <LinearLayout
-                        android:layout_width="0dp"
+                    <TextView
+                        android:id="@+id/balanceTextView"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:gravity="center">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Всього оплачено"
-                            android:textSize="12sp"
-                            android:textColor="#666666" />
-
-                        <TextView
-                            android:id="@+id/totalPaymentsTextView"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:textSize="16sp"
-                            android:textColor="#FF9800"
-                            android:textStyle="bold"
-                            android:layout_marginTop="4dp"
-                            tools:text="930.00₴" />
-                    </LinearLayout>
-
-                    <!-- Balance -->
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:gravity="center">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Залишок"
-                            android:textSize="12sp"
-                            android:textColor="#666666" />
-
-                        <TextView
-                            android:id="@+id/balanceTextView"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:textSize="18sp"
-                            android:textStyle="bold"
-                            android:layout_marginTop="4dp"
-                            tools:text="320.50₴"
-                            tools:textColor="#4CAF50" />
-                    </LinearLayout>
+                        android:textSize="24sp"
+                        android:textStyle="bold"
+                        android:layout_marginTop="4dp"
+                        tools:text="320.50₴"
+                        tools:textColor="#4CAF50" />
                 </LinearLayout>
 
                 <!-- Today's Production -->
@@ -164,7 +108,7 @@
                     android:orientation="horizontal"
                     android:layout_marginBottom="16dp"
                     android:padding="12dp"
-                    android:background="#F5F5F5"
+                    android:background="@drawable/rounded_status_background"
                     android:gravity="center_vertical">
 
                     <TextView
@@ -172,7 +116,8 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="Пінеток сьогодні:"
-                        android:textSize="14sp" />
+                        android:textSize="14sp"
+                        android:textColor="@color/text_primary" />
 
                     <TextView
                         android:id="@+id/todayPunnetsTextView"
@@ -180,32 +125,22 @@
                         android:layout_height="wrap_content"
                         android:textSize="16sp"
                         android:textStyle="bold"
+                        android:textColor="@color/text_primary"
                         tools:text="12" />
                 </LinearLayout>
 
-                <!-- Payment Buttons -->
-                <LinearLayout
+                <!-- Payment Button -->
+                <Button
+                    android:id="@+id/partialPaymentButton"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <Button
-                        android:id="@+id/fullPaymentButton"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
-                        android:layout_weight="1"
-                        android:text="Повна оплата" />
-
-                    <Button
-                        android:id="@+id/partialPaymentButton"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:layout_weight="1"
-                        android:text="Часткова оплата" />
-                </LinearLayout>
+                    android:layout_height="56dp"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginStart="32dp"
+                    android:layout_marginEnd="32dp"
+                    android:text="Оплата"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    style="@style/Widget.MaterialComponents.Button" />
             </LinearLayout>
         </androidx.cardview.widget.CardView>
 
@@ -215,13 +150,187 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <TextView
-                android:layout_width="wrap_content"
+            <!-- Section Header with Toggle -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Історія платежів"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="8dp" />
+                android:orientation="vertical"
+                android:layout_marginBottom="8dp">
+
+                <TextView
+                    android:id="@+id/paymentHistorySectionTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Історія платежів"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_primary"
+                    android:layout_marginBottom="8dp" />
+
+                <!-- View Toggle (visible only when no worker is selected) -->
+                <com.google.android.material.button.MaterialButtonToggleGroup
+                    android:id="@+id/viewToggleGroup"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="start"
+                    android:visibility="visible"
+                    app:singleSelection="true"
+                    app:selectionRequired="true"
+                    tools:visibility="visible">
+
+                    <Button
+                        android:id="@+id/summaryViewButton"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="Підсумки"
+                        android:textSize="12sp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:checked="true" />
+
+                    <Button
+                        android:id="@+id/detailedViewButton"
+                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="Детально"
+                        android:textSize="12sp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp" />
+
+                </com.google.android.material.button.MaterialButtonToggleGroup>
+
+            </LinearLayout>
+
+            <!-- Payment Totals Card -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/paymentTotalsCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:visibility="gone"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="3dp"
+                app:cardBackgroundColor="@color/card_background"
+                tools:visibility="visible">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <!-- Header -->
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Загальна статистика платежів"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/text_primary"
+                        android:layout_marginBottom="12dp" />
+
+                    <!-- Totals Grid -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:background="@color/surface_background"
+                        android:padding="12dp">
+
+                        <!-- Total Paid Row -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:layout_marginBottom="8dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Всього виплачено:"
+                                android:textSize="14sp"
+                                android:textColor="@color/text_secondary" />
+
+                            <TextView
+                                android:id="@+id/totalPaidAmountTextView"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="1,250.00₴"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/text_primary"
+                                tools:text="1,250.00₴" />
+
+                        </LinearLayout>
+
+                        <!-- Separator Line -->
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:background="@color/text_secondary"
+                            android:alpha="0.3"
+                            android:layout_marginVertical="8dp" />
+
+                        <!-- Paid with Berry Row -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:layout_marginBottom="6dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="• Ягодою:"
+                                android:textSize="14sp"
+                                android:textColor="@color/text_secondary" />
+
+                            <TextView
+                                android:id="@+id/totalPaidWithBerryTextView"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="750.00₴"
+                                android:textSize="14sp"
+                                android:textStyle="bold"
+                                android:textColor="#4CAF50"
+                                tools:text="750.00₴" />
+
+                        </LinearLayout>
+
+                        <!-- Paid with Money Row -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="• Грошима:"
+                                android:textSize="14sp"
+                                android:textColor="@color/text_secondary" />
+
+                            <TextView
+                                android:id="@+id/totalPaidWithMoneyTextView"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="500.00₴"
+                                android:textSize="14sp"
+                                android:textStyle="bold"
+                                android:textColor="#2196F3"
+                                tools:text="500.00₴" />
+
+                        </LinearLayout>
+
+                    </LinearLayout>
+
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
 
             <!-- Payment History List -->
             <androidx.recyclerview.widget.RecyclerView
@@ -261,6 +370,7 @@
                 android:text="Виберіть працівника"
                 android:textSize="18sp"
                 android:textStyle="bold"
+                android:textColor="@color/text_primary"
                 android:layout_marginBottom="8dp" />
 
             <TextView
@@ -268,7 +378,7 @@
                 android:layout_height="wrap_content"
                 android:text="Оберіть працівника зі списку вище, щоб переглянути його баланс та здійснити оплату"
                 android:textSize="14sp"
-                android:textColor="#666666"
+                android:textColor="@color/text_secondary"
                 android:gravity="center"
                 android:alpha="0.7" />
         </LinearLayout>

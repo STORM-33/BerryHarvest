@@ -80,8 +80,8 @@ class RowCollectionFragment : BaseFragment() {
     }
 
     private fun setupQuarterChips() {
-        // Create chips for quarters 1-4
-        for (quarter in 1..4) {
+        // Create chips for quarters 1-3
+        for (quarter in 1..3) {
             val chip = Chip(requireContext()).apply {
                 text = "К$quarter"
                 isCheckable = true
@@ -131,7 +131,9 @@ class RowCollectionFragment : BaseFragment() {
         launchWhenStarted("rows-flow") {
             viewModel.groupedRows.collect { groupedRows ->
                 val actualCounts = viewModel.getActualCollectedCounts()
-                rowAdapter.submitGroupedRowsWithActualCounts(groupedRows, actualCounts)
+                val totalCounts = viewModel.getTotalRowCounts()
+                rowAdapter.submitGroupedRowsWithActualCounts(groupedRows, actualCounts, totalCounts)
+
             }
         }
 

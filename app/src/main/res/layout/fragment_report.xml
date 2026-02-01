@@ -67,7 +67,7 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="Всього збрано лотків"
+                                    android:text="Всього лотків"
                                     android:textSize="@dimen/stats_label_text_size"
                                     android:textColor="@color/text_secondary"
                                     android:gravity="center"
@@ -296,10 +296,11 @@
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
-            <!-- Worker Performance Section -->
+            <!-- Detailed Views Buttons Card -->
             <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginBottom="@dimen/card_margin"
                 app:cardCornerRadius="@dimen/card_corner_radius"
                 app:cardElevation="@dimen/card_elevation">
 
@@ -310,31 +311,49 @@
                     android:padding="@dimen/card_padding">
 
                     <TextView
-                        android:layout_width="match_parent"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="👥 Продуктивність працівників"
+                        android:text="📋 Детальні звіти"
                         android:textAppearance="@style/TextAppearance.AppCompat.Medium"
                         android:textSize="@dimen/section_title_text_size"
                         android:textStyle="bold"
-                        android:layout_marginBottom="@dimen/small_margin" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="(сортування за загальною кількістю)"
-                        android:textSize="@dimen/caption_text_size"
-                        android:textColor="@color/text_secondary"
                         android:layout_marginBottom="@dimen/section_title_margin" />
 
-                    <!-- No table header - just use RecyclerView with card-based design -->
-                    <androidx.recyclerview.widget.RecyclerView
-                        android:id="@+id/workerStatsRecyclerView"
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Натисніть для перегляду детальної інформації"
+                        android:textSize="@dimen/caption_text_size"
+                        android:textColor="@color/text_secondary"
+                        android:layout_marginBottom="16dp" />
+
+                    <!-- Buttons Row -->
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:nestedScrollingEnabled="false"
-                        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
-                        tools:itemCount="5"
-                        tools:listitem="@layout/item_worker_stats" />
+                        android:orientation="horizontal"
+                        android:gravity="center">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/workerProductivityButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="8dp"
+                            android:text="Продуктивність"
+                            android:textSize="11sp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/dailyCollectionsButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:text="Щоденні збори"
+                            android:textSize="11sp" />
+
+                    </LinearLayout>
+
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 

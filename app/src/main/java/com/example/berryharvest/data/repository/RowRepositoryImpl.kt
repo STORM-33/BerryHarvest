@@ -3,6 +3,7 @@ package com.example.berryharvest.data.repository
 import android.app.Application
 import android.util.Log
 import com.example.berryharvest.NetworkConnectivityManager
+import com.example.berryharvest.data.model.Gather
 import com.example.berryharvest.data.model.Row
 import io.realm.kotlin.MutableRealm
 import io.realm.kotlin.Realm
@@ -578,6 +579,83 @@ class RowRepositoryImpl(
         } catch (e: Exception) {
             Log.e(logTag, "Error in getRowsCollectedInRange", e)
             emit(Result.Error(e))
+        }
+    }
+
+    /**
+     * Update plant count for a row.
+     */
+    override suspend fun updateRowPlantCount(rowId: String, plantCount: Int): Result<Boolean> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Updating plant count for row: $rowId to $plantCount")
+
+            if (plantCount <= 0) {
+                return@withDatabaseContext Result.Error(Exception("Plant count must be greater than 0"))
+            }
+
+            safeWrite {
+                val row = query<Row>("_id == $0", rowId).first().find()
+                row?.apply {
+                    this.plantCount = plantCount
+                    this.isSynced = networkManager.isNetworkAvailable()
+                }
+            }
+
+            // Track pending operation if offline
+            if (!networkManager.isNetworkAvailable()) {
+                addPendingOperation(
+                    PendingOperation.Update(rowId, entityType)
+                )
+            }
+
+            Result.Success(true)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error updating plant count", e)
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Get all rows with their performance data for Excel reporting.
+     */
+    override suspend fun getRowsPerformanceData(): Result<List<RowPerformanceData>> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Getting rows performance data for Excel reporting")
+
+            // Get all non-deleted rows
+            val rows = realm.query<Row>("isDeleted == false")
+                .sort("quarter" to Sort.ASCENDING, "rowNumber" to Sort.ASCENDING)
+                .find()
+
+            // Get all non-deleted gathers
+            val gathers = realm.query<Gather>("isDeleted == false").find()
+
+            // Group gathers by row number
+            val gathersByRow = gathers.groupBy { it.rowNumber }
+
+            // Calculate performance data for each row
+            val performanceData = rows.map { row ->
+                val rowGathers = gathersByRow[row.rowNumber] ?: emptyList()
+                val totalPunnets = rowGathers.sumOf { it.numOfPunnets ?: 0 }
+                val totalKg = totalPunnets * 0.64f
+                val avgYieldPerPlant = if (row.plantCount > 0) totalKg / row.plantCount else 0f
+
+                RowPerformanceData(
+                    rowNumber = row.rowNumber,
+                    quarter = row.quarter,
+                    berryVariety = row.berryVariety.ifEmpty { "Not specified" },
+                    plantCount = row.plantCount,
+                    totalPunnets = totalPunnets,
+                    avgYieldPerPlant = avgYieldPerPlant,
+                    totalKg = totalKg
+                )
+            }
+
+            Log.d(logTag, "Generated performance data for ${performanceData.size} rows")
+            Result.Success(performanceData)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error getting rows performance data", e)
+            Result.Error(e)
         }
     }
 }

@@ -65,7 +65,7 @@ class AssignRowsFragment : BaseFragment() {
         rowCountTextView = view.findViewById(R.id.rowCountTextView)
 
         setupUI()
-        setupValidationAndFiltering()
+        setupFiltering()
         setupWorkerSearch()
 
         return view
@@ -119,7 +119,7 @@ class AssignRowsFragment : BaseFragment() {
         }
     }
 
-    private fun setupValidationAndFiltering() {
+    private fun setupFiltering() {
         rowEditText.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -127,18 +127,8 @@ class AssignRowsFragment : BaseFragment() {
             override fun afterTextChanged(s: Editable?) {
                 val text = s.toString().trim()
                 filterAssignments(text)
-
-                if (rowNumberInputLayout.error != null) {
-                    rowNumberInputLayout.error = null
-                }
             }
         })
-
-        rowEditText.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) {
-                validateRowNumber(rowEditText.text.toString())
-            }
-        }
     }
 
     private fun filterAssignments(query: String) {
@@ -166,31 +156,29 @@ class AssignRowsFragment : BaseFragment() {
         }
     }
 
-    private fun validateRowNumber(rowNumberText: String): Boolean {
+    private fun validateInputs(): Boolean {
+        val rowNumberText = rowEditText.text.toString().trim()
+
         if (rowNumberText.isEmpty()) {
-            rowNumberInputLayout.error = "Введіть номер"
+            Toast.makeText(requireContext(), "Введіть номер ряду", Toast.LENGTH_SHORT).show()
+            rowEditText.requestFocus()
             return false
         }
 
         val rowNumber = rowNumberText.toIntOrNull()
         if (rowNumber == null || rowNumber !in 1..999) {
-            rowNumberInputLayout.error = "Введіть номер (1-999)"
+            Toast.makeText(requireContext(), "Введіть коректний номер ряду (1-999)", Toast.LENGTH_SHORT).show()
+            rowEditText.requestFocus()
             return false
         }
-
-        rowNumberInputLayout.error = null
-        return true
-    }
-
-    private fun validateInputs(): Boolean {
-        val rowNumberValid = validateRowNumber(rowEditText.text.toString())
 
         if (selectedWorker == null) {
             Toast.makeText(requireContext(), "Виберіть працівника", Toast.LENGTH_SHORT).show()
+            workerSearchView.requestFocus()
             return false
         }
 
-        return rowNumberValid
+        return true
     }
 
     private fun createAssignmentAdapter(): AssignmentAdapter {
@@ -463,7 +451,6 @@ class AssignRowsFragment : BaseFragment() {
 
                         workerSearchView.clearSelection()
                         selectedWorker = null
-                        rowNumberInputLayout.error = null
                     }
                     is com.example.berryharvest.data.repository.Result.Error -> {
                         Toast.makeText(requireContext(), "Помилка: ${result.message}", Toast.LENGTH_SHORT).show()
@@ -506,17 +493,17 @@ class AssignRowsFragment : BaseFragment() {
             val newRowText = newRowEditText.text.toString().trim()
 
             if (newRowText.isEmpty()) {
-                newRowInputLayout.error = "Введіть номер"
+                Toast.makeText(requireContext(), "Введіть новий номер ряду", Toast.LENGTH_SHORT).show()
+                newRowEditText.requestFocus()
                 return@setOnClickListener
             }
 
             val newRowNumber = newRowText.toIntOrNull()
             if (newRowNumber == null || newRowNumber !in 1..999) {
-                newRowInputLayout.error = "Введіть номер (1-999)"
+                Toast.makeText(requireContext(), "Введіть коректний номер ряду (1-999)", Toast.LENGTH_SHORT).show()
+                newRowEditText.requestFocus()
                 return@setOnClickListener
             }
-
-            newRowInputLayout.error = null
 
             // Check if target row is collected
             checkRowCollectionStatus(newRowNumber) { isCollected ->

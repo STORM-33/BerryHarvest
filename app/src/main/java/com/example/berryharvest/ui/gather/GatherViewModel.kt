@@ -79,6 +79,9 @@ class GatherViewModel(application: Application) : AndroidViewModel(application) 
     private val _successMessage = MutableLiveData<Boolean>()
     val successMessage: LiveData<Boolean> = _successMessage
 
+    private val _gatherSummary = MutableLiveData<GatherSummaryData?>()
+    val gatherSummary: LiveData<GatherSummaryData?> = _gatherSummary
+
     // Cache for efficient data access
     private var workersCache = mapOf<String, Worker>()
     private var lastDataRefresh = 0L
@@ -404,6 +407,28 @@ class GatherViewModel(application: Application) : AndroidViewModel(application) 
 
                     when (result) {
                         is Result.Success -> {
+                            // Get worker name
+                            val worker = workersCache[workerId]
+                            val workerName = if (worker != null) {
+                                "${worker.fullName} [${worker.sequenceNumber}]"
+                            } else {
+                                "Невідомий працівник"
+                            }
+
+                            // Get total punnets for today for this worker
+                            val todayProductionResult = gatherRepository.getWorkerTodayProduction(workerId)
+                            val totalPunnetsToday = when (todayProductionResult) {
+                                is Result.Success -> todayProductionResult.data
+                                else -> numOfPunnets // fallback to current gather amount
+                            }
+
+                            // Create summary data
+                            val summaryData = GatherSummaryData(
+                                workerName = workerName,
+                                totalPunnetsToday = totalPunnetsToday
+                            )
+
+                            _gatherSummary.postValue(summaryData)
                             _successMessage.postValue(true)
                             refreshDataAfterOperation()
                         }
@@ -423,6 +448,8 @@ class GatherViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
+
+    fun clearGatherSummary() = _gatherSummary.postValue(null)
 
     fun updateGatherDetails(gatherId: String, numOfPunnets: Int) {
         viewModelScope.launch {

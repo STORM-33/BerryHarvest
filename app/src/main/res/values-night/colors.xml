@@ -2,6 +2,12 @@
 <resources>
     <!-- Text Colors for Dark Theme -->
     <color name="text_secondary">#AAAAAA</color>
+    <color name="text_primary">#E0E0E0</color>
+
+    <!-- Background Colors for Dark Theme -->
+    <color name="card_background">#2C2C2C</color>
+    <color name="surface_background">#1E1E1E</color>
+    <color name="gather_item_background">@android:color/transparent</color>
 
     <!-- Table Colors for Dark Theme -->
     <color name="table_header_background">#2C2C2C</color>

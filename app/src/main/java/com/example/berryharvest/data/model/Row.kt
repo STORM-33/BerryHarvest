@@ -10,6 +10,7 @@ class Row : RealmObject {
     var rowNumber: Int = 0
     var quarter: Int = 1 // 1-4 for quarters
     var berryVariety: String = "" // Type of berry in this row
+    var plantCount: Int = 100 // Number of plants in this row (default: 100)
     var isCollected: Boolean = false
     var createdAt: Long = System.currentTimeMillis()
     var collectedAt: Long? = null // When it was collected

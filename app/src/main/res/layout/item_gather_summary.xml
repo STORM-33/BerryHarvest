@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="16dp"
+    android:gravity="center_vertical"
+    android:background="@color/gather_item_background">
+
+    <!-- Time/Type Column -->
+    <TextView
+        android:id="@+id/timeTextView"
+        android:layout_width="60dp"
+        android:layout_height="wrap_content"
+        android:text="Збір"
+        android:textSize="14sp"
+        android:textColor="#4CAF50"
+        android:textStyle="bold"
+        tools:text="Збір" />
+
+    <!-- Punnet Details Column -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="16dp"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/punnetsTextView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="15 шт."
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                tools:text="15 шт." />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=" × "
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:layout_marginHorizontal="4dp" />
+
+            <TextView
+                android:id="@+id/priceTextView"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="25.00₴/шт"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                tools:text="25.00₴/шт" />
+
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Зібрано пінеток"
+            android:textSize="12sp"
+            android:textColor="#4CAF50"
+            android:layout_marginTop="2dp" />
+
+    </LinearLayout>
+
+    <!-- Earnings Column -->
+    <TextView
+        android:id="@+id/earningsTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="+375.00₴"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textColor="#4CAF50"
+        tools:text="+375.00₴" />
+
+</LinearLayout>

@@ -26,4 +26,82 @@
     <string name="all_rows">Всі рядки</string>
     <string name="berry_variety">Сорт ягід</string>
     <string name="row_number">Номер рядка</string>
+
+    <!-- Gather Summary Dialog Strings -->
+    <string name="gather_summary_title">Збір успішно додано!</string>
+    <string name="gather_summary_info_title">Інформація про збір:</string>
+    <string name="gather_summary_worker">Працівник:</string>
+    <string name="gather_summary_row">Ряд:</string>
+    <string name="gather_summary_punnets">Кількість пінеток:</string>
+    <string name="gather_summary_price">Ціна за пінетку:</string>
+    <string name="gather_summary_total">Загальна сума:</string>
+    <string name="gather_summary_close">Закрити</string>
+    <string name="gather_summary_timestamp_format">Збір додано: %s</string>
+
+    <!-- Daily Payment Summary Strings -->
+    <string name="payment_summary_total_paid">Всього виплачено:</string>
+    <string name="payment_summary_paid_with_berry">Ягодою:</string>
+    <string name="payment_summary_paid_other">Грошима:</string>
+    <string name="payment_summary_daily_summaries">Щоденні підсумки</string>
+    <string name="payment_summary_no_payments">Немає платежів</string>
+    <string name="payment_summary_no_payments_desc">Платежі з\'являться тут після їх здійснення</string>
+
+    <!-- Report Fragment -->
+    <string name="detailed_reports">Детальні звіти</string>
+    <string name="detailed_reports_description">Натисніть для перегляду детальної інформації</string>
+    <string name="worker_productivity_button">Продуктивність</string>
+    <string name="daily_collections_button">Щоденні збори</string>
+    <string name="all_workers">Усі працівники</string>
+    <string name="all_workers_description">(сортування за загальною кількістю)</string>
+
+    <!-- Worker Productivity Dialog -->
+    <string name="worker_productivity_title">Продуктивність працівників</string>
+    <string name="total_workers">Всього працівників: %d</string>
+    <string name="close">Закрити</string>
+    <string name="punnets">Пінеток</string>
+    <string name="per_day">За день</string>
+    <string name="earnings">Заробіток</string>
+
+    <!-- Daily Collections Dialog -->
+    <string name="daily_collections_title">Щоденні збори</string>
+    <string name="total_days">Всього днів: %d</string>
+    <string name="workers">Працівників</string>
+    <string name="trays">Лотків</string>
+    <string name="average_per_person">Середнє/особа</string>
+    <string name="total_sum">Загальна сума</string>
+    <string name="worker_details">Деталі по працівниках:</string>
+    <string name="no_worker_data">Немає даних про працівників</string>
+    <string name="no_daily_data">Немає даних про щоденні збори</string>
+    <string name="loading_daily_data_error">Помилка завантаження даних: %s</string>
+
+    <!-- Excel Export (moved to MainActivity) -->
+    <string name="excel_export_title">Експорт Excel звіту</string>
+    <string name="excel_export_message">Створити повний Excel звіт з усіма даними?</string>
+    <string name="export">Експортувати</string>
+    <string name="cancel">Скасувати</string>
+    <string name="excel_export_progress_title">Експорт Excel</string>
+    <string name="excel_export_progress_message">Створення Excel файлу...</string>
+    <string name="excel_export_success_title">Експорт завершено</string>
+    <string name="excel_export_error_title">Помилка експорту</string>
+    <string name="excel_export_error_message">Не вдалося створити Excel файл: %s</string>
+    <string name="open">Відкрити</string>
+    <string name="share">Поділитися</string>
+    <string name="excel_file_open_error_title">Помилка відкриття</string>
+    <string name="excel_file_open_error_message">Не вдалося відкрити файл: %s</string>
+    <string name="excel_file_share_error">Не вдалося поділитися файлом: %s</string>
+    <string name="open_file">Відкрити файл</string>
+    <string name="share_report">Поділитися звітом</string>
+
+    <!-- File size formatting -->
+    <string name="file_size_bytes">%d Б</string>
+    <string name="file_size_kb">%d КБ</string>
+    <string name="file_size_mb">%.1f МБ</string>
+
+    <!-- Success messages for Excel export -->
+    <string name="excel_success_file">Файл: %s</string>
+    <string name="excel_success_location">Розташування: %s</string>
+    <string name="excel_success_sheets">Аркушів: %d</string>
+    <string name="excel_success_records">Записів: %d</string>
+    <string name="excel_success_file_size">Розмір файлу: %s</string>
+    <string name="excel_file_created">Excel файл успішно створено!</string>
 </resources>

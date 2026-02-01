@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="8dp"
+    android:background="?android:attr/selectableItemBackground"
+    android:gravity="center_vertical">
+
+    <!-- Worker name - takes most space -->
+    <TextView
+        android:id="@+id/workerNameTextView"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="2"
+        android:text="Вовк Олена [123]"
+        android:textSize="14sp"
+        android:maxLines="1"
+        android:ellipsize="end" />
+
+    <!-- Punnets count -->
+    <TextView
+        android:id="@+id/workerPunnetsTextView"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="234"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="@color/success_color"
+        android:gravity="center" />
+
+    <!-- Earnings -->
+    <TextView
+        android:id="@+id/workerEarningsTextView"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="468.00₴"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="@color/warning_color"
+        android:gravity="end" />
+
+</LinearLayout>

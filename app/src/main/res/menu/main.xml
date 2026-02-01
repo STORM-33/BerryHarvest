@@ -14,4 +14,15 @@
         android:title="Генерувати бейджі"
         app:showAsAction="never" />
 
+    <item
+        android:id="@+id/action_export_db"
+        android:orderInCategory="400"
+        android:title="Експортувати БД"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_export_excel"
+        android:orderInCategory="500"
+        android:title="Експорт Excel"
+        app:showAsAction="never" />
+
 </menu>

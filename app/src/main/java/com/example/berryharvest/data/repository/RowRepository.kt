@@ -77,4 +77,14 @@ interface RowRepository : BaseRepository<Row> {
      * Get rows collected within a specific time range.
      */
     suspend fun getRowsCollectedInRange(startTime: Long, endTime: Long): Flow<Result<List<Row>>>
+
+    /**
+     * Get all rows with their performance data for Excel reporting.
+     */
+    suspend fun getRowsPerformanceData(): Result<List<RowPerformanceData>>
+
+    /**
+     * Update plant count for a row.
+     */
+    suspend fun updateRowPlantCount(rowId: String, plantCount: Int): Result<Boolean>
 }

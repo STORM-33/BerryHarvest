@@ -224,7 +224,7 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
         return activeWorkersToday.size
     }
 
-    // Load worker performance statistics
+    // Load worker performance statistics - show ALL workers, not limited
     private suspend fun loadWorkerStats() {
         try {
             val realm = app.getRealmInstance()
@@ -301,6 +301,93 @@ class ReportViewModel(application: Application) : AndroidViewModel(application) 
             _errorMessage.value = "Помилка при завантаженні даних працівників: ${e.message}"
         }
     }
+
+    // NEW: Load daily collections data for the dialog
+    suspend fun loadDailyCollectionsData(): List<DailyCollectionData> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val realm = app.getRealmInstance()
+                val workers = realm.query<Worker>("isDeleted == false").find()
+                val gathers = realm.query<Gather>("isDeleted == false").find()
+
+                // Create worker lookup map
+                val workerMap = workers.associateBy { it._id }
+
+                // Group gathers by date
+                val gathersByDate = gathers.groupBy { gather ->
+                    try {
+                        val dateStr = gather.dateTime ?: ""
+                        dateStr.substring(0, 10) // Extract YYYY-MM-DD part
+                    } catch (e: Exception) {
+                        "Unknown"
+                    }
+                }.filterKeys { it != "Unknown" }.toSortedMap(reverseOrder()) // Most recent first
+
+                // Create daily collection data
+                val dailyData = mutableListOf<DailyCollectionData>()
+                val dateFormat = SimpleDateFormat("dd MMMM yyyy", Locale("uk", "UA"))
+
+                gathersByDate.forEach { (date, dayGathers) ->
+                    val uniqueWorkers = dayGathers.mapNotNull { it.workerId }.distinct()
+                    val totalPunnets = dayGathers.sumOf { it.numOfPunnets ?: 0 }
+                    val totalTrays = totalPunnets / 10
+                    val avgPerWorker = if (uniqueWorkers.isNotEmpty()) totalPunnets.toFloat() / uniqueWorkers.size else 0f
+                    val totalSum = dayGathers.sumOf { gather ->
+                        ((gather.numOfPunnets ?: 0) * (gather.punnetCost ?: 0f)).toDouble()
+                    }.toFloat()
+
+                    // Format date for display
+                    val formattedDate = try {
+                        val parsedDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(date)
+                        if (parsedDate != null) dateFormat.format(parsedDate) else date
+                    } catch (e: Exception) {
+                        date
+                    }
+
+                    // Get worker details for this day
+                    val workerDetails = dayGathers.groupBy { it.workerId }
+                        .mapNotNull { (workerId, workerGathers) ->
+                            // Skip if workerId is null or empty
+                            if (workerId.isNullOrEmpty()) return@mapNotNull null
+
+                            val worker = workerMap[workerId]
+                            if (worker != null) {
+                                val workerPunnets = workerGathers.sumOf { it.numOfPunnets ?: 0 }
+                                val workerEarnings = workerGathers.sumOf { gather ->
+                                    ((gather.numOfPunnets ?: 0) * (gather.punnetCost ?: 0f)).toDouble()
+                                }.toFloat()
+
+                                DailyWorkerData(
+                                    workerId = workerId, // Now guaranteed to be non-null
+                                    workerName = "${worker.fullName} [${worker.sequenceNumber}]",
+                                    punnets = workerPunnets,
+                                    earnings = workerEarnings
+                                )
+                            } else null
+                        }.sortedByDescending { it.punnets }
+
+                    dailyData.add(
+                        DailyCollectionData(
+                            date = formattedDate,
+                            dateKey = date,
+                            workerCount = uniqueWorkers.size,
+                            totalPunnets = totalPunnets,
+                            totalTrays = totalTrays,
+                            avgPunnetsPerWorker = avgPerWorker,
+                            totalSum = totalSum,
+                            workerDetails = workerDetails
+                        )
+                    )
+                }
+
+                Log.d(TAG, "Loaded ${dailyData.size} daily collection records")
+                dailyData
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading daily collections data", e)
+                throw e
+            }
+        }
+    }
 }
 
 // Data classes for UI state
@@ -321,4 +408,23 @@ data class WorkerStats(
     val totalPunnets: Int,
     val totalEarnings: Float,
     val avgPunnetsPerDay: Float
+)
+
+// NEW: Data classes for daily collections
+data class DailyCollectionData(
+    val date: String,
+    val dateKey: String,
+    val workerCount: Int,
+    val totalPunnets: Int,
+    val totalTrays: Int,
+    val avgPunnetsPerWorker: Float,
+    val totalSum: Float,
+    val workerDetails: List<DailyWorkerData>
+)
+
+data class DailyWorkerData(
+    val workerId: String,
+    val workerName: String,
+    val punnets: Int,
+    val earnings: Float
 )

@@ -228,6 +228,12 @@ class GatherFragment : BaseFragment() {
                 viewModel.clearWorkerAssignment()
             }
         }
+
+        viewModel.gatherSummary.observe(viewLifecycleOwner) { summaryData ->
+            summaryData?.let {
+                showGatherSummaryDialog(it)
+            }
+        }
     }
 
     private fun updateConnectionState(state: ConnectionState) {
@@ -277,7 +283,7 @@ class GatherFragment : BaseFragment() {
 
     private fun updateStatsDisplay(stats: TodayStats) {
         totalPunnetsTextView.text = stats.totalPunnets.toString()
-        totalAmountTextView.text = String.format(Locale.getDefault(), "%.2f₴", stats.totalAmount)
+        totalAmountTextView.text = String.format(Locale.getDefault(), "%.0f₴", stats.totalAmount)
     }
 
     private fun updatePriceDisplay(price: Float) {
@@ -589,6 +595,9 @@ class GatherFragment : BaseFragment() {
         var selectedWorker: Worker? = null
         var selectedRowNumber: Int? = null
 
+        // Create the dialog instance
+        var dialog: AlertDialog? = null
+
         // Load workers and setup spinner
         viewLifecycleOwner.lifecycleScope.launch {
             try {
@@ -611,12 +620,19 @@ class GatherFragment : BaseFragment() {
                             val workerItem = selectedItem as com.example.berryharvest.ui.common.WorkerSearchableItem
                             selectedWorker = workerItem.worker
 
-                            // Check worker assignment and show row info
-                            checkWorkerAssignmentAndUpdateDialog(
+                            // Check worker assignment and handle accordingly
+                            checkWorkerAssignmentForManualEntry(
                                 workerItem.worker,
-                                rowNumberTextView
-                            ) { rowNumber ->
+                                rowNumberTextView,
+                                dialog
+                            ) { worker, rowNumber ->
+                                // Callback when assignment is resolved
+                                selectedWorker = worker
                                 selectedRowNumber = rowNumber
+
+                                // Update UI to show the assignment
+                                rowNumberTextView.text = "Ряд: $rowNumber"
+                                rowNumberTextView.visibility = View.VISIBLE
                             }
                         }
                     }
@@ -635,7 +651,7 @@ class GatherFragment : BaseFragment() {
             }
         }
 
-        val dialog = AlertDialog.Builder(requireContext())
+        dialog = AlertDialog.Builder(requireContext())
             .setTitle("Ручне введення збору")
             .setView(dialogView)
             .setPositiveButton("Зберегти") { _, _ ->
@@ -648,7 +664,7 @@ class GatherFragment : BaseFragment() {
                     worker == null -> {
                         Toast.makeText(activity, "Оберіть працівника", Toast.LENGTH_SHORT).show()
                     }
-                    rowNumber == null -> {
+                    rowNumber == null || rowNumber == -1 -> {
                         Toast.makeText(activity, "Працівник не призначений на ряд", Toast.LENGTH_SHORT).show()
                     }
                     numOfPunnetsText.isBlank() -> {
@@ -673,6 +689,146 @@ class GatherFragment : BaseFragment() {
         // Handle dialog dismiss to cleanup spinner
         dialog.setOnDismissListener {
             workerSpinner.hideDropdownForced()
+        }
+
+        dialog.show()
+    }
+
+    /**
+     * Check worker assignment for manual entry and handle assignment flow
+     */
+    private fun checkWorkerAssignmentForManualEntry(
+        worker: Worker,
+        rowNumberTextView: TextView,
+        parentDialog: AlertDialog?,
+        onAssignmentResolved: (Worker, Int) -> Unit
+    ) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                // Check if worker has assignment
+                when (val assignmentResult = app.repositoryProvider.assignmentRepository.getWorkerAssignment(worker._id)) {
+                    is com.example.berryharvest.data.repository.Result.Success -> {
+                        val assignment = assignmentResult.data
+                        if (assignment != null && assignment.rowNumber != null) {
+                            // Worker has assignment - proceed normally
+                            onAssignmentResolved(worker, assignment.rowNumber!!)
+                        } else {
+                            // Worker has no assignment - show assignment dialog
+                            rowNumberTextView.text = "Працівник не призначений на ряд"
+                            rowNumberTextView.visibility = View.VISIBLE
+
+                            // Temporarily hide the parent dialog and show assignment dialog
+                            parentDialog?.hide()
+                            showAssignWorkerToRowDialogForManualEntry(worker, parentDialog) { assignedWorker, assignedRowNumber ->
+                                // After successful assignment, resolve and show parent dialog again
+                                onAssignmentResolved(assignedWorker, assignedRowNumber)
+                                parentDialog?.show()
+                            }
+                        }
+                    }
+                    is com.example.berryharvest.data.repository.Result.Error -> {
+                        rowNumberTextView.text = "Помилка перевірки призначення"
+                        rowNumberTextView.visibility = View.VISIBLE
+                        Log.e("GatherFragment", "Error checking assignment: ${assignmentResult.message}")
+                        Toast.makeText(requireContext(), "Помилка перевірки призначення: ${assignmentResult.message}", Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {
+                        rowNumberTextView.text = "Перевірка призначення..."
+                        rowNumberTextView.visibility = View.VISIBLE
+                    }
+                }
+            } catch (e: Exception) {
+                rowNumberTextView.text = "Помилка: ${e.message}"
+                rowNumberTextView.visibility = View.VISIBLE
+                Log.e("GatherFragment", "Error checking worker assignment", e)
+                Toast.makeText(requireContext(), "Помилка перевірки призначення: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
+     * Show assignment dialog specifically for manual entry flow
+     */
+    private fun showAssignWorkerToRowDialogForManualEntry(
+        worker: Worker,
+        parentDialog: AlertDialog?,
+        onAssignmentComplete: (Worker, Int) -> Unit
+    ) {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_move_or_delete_worker, null)
+        val newRowEditText = dialogView.findViewById<EditText>(R.id.newRowEditText)
+        val moveButton = dialogView.findViewById<Button>(R.id.moveButton)
+        val deleteButton = dialogView.findViewById<Button>(R.id.deleteButton)
+
+        moveButton.text = "Призначити"
+        deleteButton.text = "Скасувати"
+
+        val assignmentDialog = AlertDialog.Builder(requireContext())
+            .setTitle("Працівник не призначений на ряд")
+            .setMessage("Працівник ${worker.fullName} [${worker.sequenceNumber}] не призначений на жоден ряд. Призначте ряд, щоб продовжити:")
+            .setView(dialogView)
+            .setCancelable(false)
+            .create()
+
+        moveButton.setOnClickListener {
+            val rowNumberText = newRowEditText.text.toString().trim()
+            val rowNumber = rowNumberText.toIntOrNull()
+
+            if (rowNumberText.isEmpty() || rowNumber == null || rowNumber !in 1..999) {
+                Toast.makeText(requireContext(), "Введіть корректний номер ряду (1-999)", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            viewModel.assignWorkerToRow(worker._id, rowNumber).observe(viewLifecycleOwner) { success ->
+                if (success) {
+                    assignmentDialog.dismiss()
+                    Toast.makeText(requireContext(), "Працівник успішно призначений на ряд $rowNumber", Toast.LENGTH_SHORT).show()
+
+                    // Notify that assignment is complete
+                    onAssignmentComplete(worker, rowNumber)
+                }
+            }
+        }
+
+        deleteButton.setOnClickListener {
+            assignmentDialog.dismiss()
+            // Show the parent dialog again if user cancels
+            parentDialog?.show()
+        }
+
+        // Handle back button or outside touch
+        assignmentDialog.setOnDismissListener {
+            // If dismissed without assignment, show parent dialog again
+            parentDialog?.show()
+        }
+
+        assignmentDialog.show()
+    }
+
+    private fun showGatherSummaryDialog(summaryData: GatherSummaryData) {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_gather_summary, null)
+
+        // Find views
+        val workerNameSummaryTextView: TextView = dialogView.findViewById(R.id.workerNameSummaryTextView)
+        val totalPunnetsTextView: TextView = dialogView.findViewById(R.id.totalPunnetsTextView)
+        val closeSummaryButton: Button = dialogView.findViewById(R.id.closeSummaryButton)
+
+        // Set data
+        workerNameSummaryTextView.text = summaryData.workerName
+        totalPunnetsTextView.text = "${summaryData.totalPunnetsToday} пінеток"
+
+        val dialog = AlertDialog.Builder(requireContext())
+            .setView(dialogView)
+            .setCancelable(true)
+            .create()
+
+        // Set up close button
+        closeSummaryButton.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        // Clear summary when dialog is dismissed
+        dialog.setOnDismissListener {
+            viewModel.clearGatherSummary()
         }
 
         dialog.show()

@@ -8,7 +8,6 @@ import android.view.ViewGroup
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
-import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -16,9 +15,9 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.example.berryharvest.BaseFragment
 import com.example.berryharvest.R
-import com.example.berryharvest.data.repository.ConnectionState
+import com.google.android.material.button.MaterialButton
 import kotlinx.coroutines.launch
-import java.util.Locale
+import java.util.*
 
 class ReportFragment : BaseFragment() {
     private val TAG = "ReportFragment"
@@ -36,9 +35,9 @@ class ReportFragment : BaseFragment() {
     private lateinit var todayToPayTextView: TextView
     private lateinit var activeWorkersTodayTextView: TextView
 
-    // Worker stats
-    private lateinit var workerStatsRecyclerView: RecyclerView
-    private lateinit var workerStatsAdapter: WorkerStatsAdapter
+    // New buttons for detailed views
+    private lateinit var workerProductivityButton: MaterialButton
+    private lateinit var dailyCollectionsButton: MaterialButton
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -48,7 +47,7 @@ class ReportFragment : BaseFragment() {
         val root = inflater.inflate(R.layout.fragment_report, container, false)
         viewModel = ViewModelProvider(this).get(ReportViewModel::class.java)
 
-        // Initialize UI components
+        // Initialize existing UI components
         swipeRefreshLayout = root.findViewById(R.id.swipeRefreshLayout)
         loadingProgressBar = root.findViewById(R.id.loadingProgressBar)
 
@@ -60,11 +59,9 @@ class ReportFragment : BaseFragment() {
         todayToPayTextView = root.findViewById(R.id.todayToPayTextView)
         activeWorkersTodayTextView = root.findViewById(R.id.activeWorkersTodayTextView)
 
-        // Initialize worker stats recycler view
-        workerStatsRecyclerView = root.findViewById(R.id.workerStatsRecyclerView)
-        workerStatsAdapter = WorkerStatsAdapter()
-        workerStatsRecyclerView.adapter = workerStatsAdapter
-        workerStatsRecyclerView.layoutManager = LinearLayoutManager(requireContext())
+        // Initialize new buttons
+        workerProductivityButton = root.findViewById(R.id.workerProductivityButton)
+        dailyCollectionsButton = root.findViewById(R.id.dailyCollectionsButton)
 
         setupUI()
         setupObservers()
@@ -85,6 +82,15 @@ class ReportFragment : BaseFragment() {
         swipeRefreshLayout.setOnRefreshListener {
             refreshData()
         }
+
+        // Set up new button click listeners
+        workerProductivityButton.setOnClickListener {
+            showWorkerProductivityDialog()
+        }
+
+        dailyCollectionsButton.setOnClickListener {
+            showDailyCollectionsDialog()
+        }
     }
 
     private fun setupObservers() {
@@ -95,6 +101,10 @@ class ReportFragment : BaseFragment() {
                 if (!isLoading) {
                     swipeRefreshLayout.isRefreshing = false
                 }
+
+                // Disable buttons during loading
+                workerProductivityButton.isEnabled = !isLoading
+                dailyCollectionsButton.isEnabled = !isLoading
             }
         }
 
@@ -114,13 +124,6 @@ class ReportFragment : BaseFragment() {
                 updateSummaryStats(stats)
             }
         }
-
-        // Observe worker stats
-        launchWhenStarted("worker-stats") {
-            viewModel.workerStats.collect { workers ->
-                updateWorkerStats(workers)
-            }
-        }
     }
 
     private fun updateSummaryStats(stats: SummaryStats?) {
@@ -138,18 +141,46 @@ class ReportFragment : BaseFragment() {
         activeWorkersTodayTextView.text = "${stats.activeWorkersToday}"
     }
 
-    private fun updateWorkerStats(workers: List<WorkerStats>) {
-        // Limit to top 9 workers
-        val topWorkers = workers.take(9)
-        workerStatsAdapter.submitList(topWorkers)
-    }
-
     private fun refreshData() {
         viewModel.loadReportData()
     }
+
+    private fun showWorkerProductivityDialog() {
+        // Collect current worker stats
+        val currentWorkerStats = viewModel.workerStats.value
+
+        if (currentWorkerStats.isEmpty()) {
+            Toast.makeText(context, "Немає даних про працівників", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val dialog = WorkerProductivityDialog(requireContext(), currentWorkerStats)
+        dialog.show()
+    }
+
+    private fun showDailyCollectionsDialog() {
+        // Create and show daily collections dialog
+        lifecycleScope.launch {
+            try {
+                // Load daily data
+                val dailyData = viewModel.loadDailyCollectionsData()
+
+                if (dailyData.isEmpty()) {
+                    Toast.makeText(context, "Немає даних про щоденні збори", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+
+                val dialog = DailyCollectionsDialog(requireContext(), dailyData)
+                dialog.show()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading daily collections data", e)
+                Toast.makeText(context, "Помилка завантаження даних: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 }
 
-// Fixed Worker stats adapter with proper rankings and TextView binding
+// Worker stats adapter remains the same
 class WorkerStatsAdapter :
     androidx.recyclerview.widget.ListAdapter<WorkerStats, WorkerStatsAdapter.ViewHolder>(
         object : androidx.recyclerview.widget.DiffUtil.ItemCallback<WorkerStats>() {

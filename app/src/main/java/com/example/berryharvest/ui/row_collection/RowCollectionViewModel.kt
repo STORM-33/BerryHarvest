@@ -24,7 +24,7 @@ class RowCollectionViewModel(application: Application) : AndroidViewModel(applic
     private val networkStatusManager = app.networkStatusManager
 
     // Filter states
-    private val _selectedQuarters = MutableStateFlow(setOf(1, 2, 3, 4))
+    private val _selectedQuarters = MutableStateFlow(setOf(1, 2, 3))
     val selectedQuarters: StateFlow<Set<Int>> = _selectedQuarters.asStateFlow()
 
     private val _filterMode = MutableStateFlow(FilterMode.ALL)
@@ -206,6 +206,12 @@ class RowCollectionViewModel(application: Application) : AndroidViewModel(applic
             }
         }
     }
+
+    fun getTotalRowCounts(): Map<Int, Int> {
+        return _allRows.value.groupBy { it.quarter }
+            .mapValues { it.value.size }
+    }
+
 
     private suspend fun loadUncollectedRows() {
         // First, load all rows to get correct counts

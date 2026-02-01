@@ -18,11 +18,11 @@ class RowAdapter(
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private var items = listOf<RowItem>()
+    private var totalCounts: Map<Int, Int> = emptyMap()
 
     companion object {
         private const val TYPE_HEADER = 0
         private const val TYPE_ROW = 1
-        private const val ROWS_PER_QUARTER = 100 // Configurable if needed
     }
 
     sealed class RowItem {
@@ -30,35 +30,19 @@ class RowAdapter(
         data class RowData(val row: Row) : RowItem()
     }
 
-    fun submitGroupedRows(groupedRows: Map<Int, List<Row>>) {
+    fun submitGroupedRowsWithActualCounts(
+        groupedRows: Map<Int, List<Row>>,
+        actualCounts: Map<Int, Int>,
+        totalCounts: Map<Int, Int>
+    ) {
+        this.totalCounts = totalCounts
         val newItems = mutableListOf<RowItem>()
 
-        // Sort quarters and create headers with rows
         groupedRows.toSortedMap().forEach { (quarter, rows) ->
-            // For the header, we need to show the actual collected count for this quarter
-            // regardless of the current filter. We'll calculate this from the rows we have.
-            val collectedCount = rows.count { it.isCollected }
-
-            // Always show total as ROWS_PER_QUARTER, not the filtered count
-            newItems.add(RowItem.Header(quarter, collectedCount, ROWS_PER_QUARTER))
-            rows.sortedBy { it.rowNumber }.forEach { row ->
-                newItems.add(RowItem.RowData(row))
-            }
-        }
-
-        items = newItems
-        notifyDataSetChanged()
-    }
-
-    fun submitGroupedRowsWithActualCounts(groupedRows: Map<Int, List<Row>>, actualCounts: Map<Int, Int>) {
-        val newItems = mutableListOf<RowItem>()
-
-        // Sort quarters and create headers with rows
-        groupedRows.toSortedMap().forEach { (quarter, rows) ->
-            // Use the actual collected count for this quarter from all rows (not just filtered)
             val actualCollectedCount = actualCounts[quarter] ?: 0
+            val total = totalCounts[quarter] ?: rows.size // fallback
 
-            newItems.add(RowItem.Header(quarter, actualCollectedCount, ROWS_PER_QUARTER))
+            newItems.add(RowItem.Header(quarter, actualCollectedCount, total))
             rows.sortedBy { it.rowNumber }.forEach { row ->
                 newItems.add(RowItem.RowData(row))
             }

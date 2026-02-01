@@ -6,6 +6,7 @@ import com.example.berryharvest.NetworkConnectivityManager
 import com.example.berryharvest.data.model.Gather
 import com.example.berryharvest.data.model.PaymentBalance
 import com.example.berryharvest.data.model.PaymentRecord
+import com.example.berryharvest.ui.payment.DailyGatherSummary
 import io.realm.kotlin.MutableRealm
 import io.realm.kotlin.Realm
 import io.realm.kotlin.ext.query
@@ -17,6 +18,9 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 import java.util.UUID
+import com.example.berryharvest.ui.payment.DailyPaymentSummary
+import com.example.berryharvest.ui.payment.PaymentTotals
+import java.util.Date
 
 /**
  * Implementation of PaymentRepository that extends BaseRepositoryImpl.
@@ -522,5 +526,305 @@ class PaymentRepositoryImpl(
 
     override fun MutableRealm.findEntityById(id: String): PaymentRecord? {
         return this.query<PaymentRecord>("_id == $0", id).first().find()
+    }
+
+    /**
+     * Get daily payment summaries grouped by date.
+     * Shows total paid, paid with berry (comment not null), and paid other ways.
+     */
+    override suspend fun getDailyPaymentSummaries(): Result<List<DailyPaymentSummary>> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Getting daily payment summaries")
+
+            // Get all payment records that are not deleted
+            val allPayments = realm.query<PaymentRecord>("isDeleted == false").find()
+            Log.d(logTag, "Found ${allPayments.size} total payment records")
+
+            // Group payments by date (day only, ignore time)
+            val groupedPayments = allPayments.groupBy { payment ->
+                val calendar = Calendar.getInstance()
+                calendar.timeInMillis = payment.date
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
+                calendar.timeInMillis
+            }
+
+            Log.d(logTag, "Grouped payments into ${groupedPayments.size} days")
+
+            // Create summary for each day
+            val dailySummaries = mutableListOf<DailyPaymentSummary>()
+            val dateFormat = SimpleDateFormat("dd MMMM", Locale("uk", "UA"))
+
+            groupedPayments.forEach { (dateTimestamp, paymentsForDate) ->
+                var totalPaid = 0.0f
+                var paidWithBerry = 0.0f
+                var paidOther = 0.0f
+
+                // Calculate totals for this day
+                paymentsForDate.forEach { payment ->
+                    val amount = payment.amount
+                    totalPaid += amount
+
+                    // Check if paid with berry (comment is not null and not empty)
+                    if (!payment.notes.isNullOrEmpty()) {
+                        paidWithBerry += amount
+                        Log.d(logTag, "Payment with berry: ${payment.amount}, notes: '${payment.notes}'")
+                    } else {
+                        paidOther += amount
+                        Log.d(logTag, "Payment other: ${payment.amount}, no notes")
+                    }
+                }
+
+                // Format date for display
+                val formattedDate = dateFormat.format(Date(dateTimestamp))
+
+                val summary = DailyPaymentSummary(
+                    date = formattedDate,
+                    dateTimestamp = dateTimestamp,
+                    totalPaid = totalPaid,
+                    paidWithBerry = paidWithBerry,
+                    paidOther = paidOther
+                )
+
+                dailySummaries.add(summary)
+                Log.d(logTag, "Created summary for $formattedDate: total=$totalPaid, berry=$paidWithBerry, other=$paidOther")
+            }
+
+            // Sort by date descending (most recent first)
+            val sortedSummaries = dailySummaries.sortedByDescending { it.dateTimestamp }
+
+            Log.d(logTag, "Created ${sortedSummaries.size} daily payment summaries")
+            Result.Success(sortedSummaries)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error getting daily payment summaries", e)
+            setError("Failed to get daily payment summaries: ${e.message}")
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Get payment totals for all payments (global).
+     */
+    override suspend fun getGlobalPaymentTotals(): Result<PaymentTotals> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Getting global payment totals")
+
+            // Get all payment records that are not deleted
+            val allPayments = realm.query<PaymentRecord>("isDeleted == false").find()
+            Log.d(logTag, "Found ${allPayments.size} total payment records")
+
+            var totalPaid = 0.0f
+            var paidWithBerry = 0.0f
+            var paidWithMoney = 0.0f
+
+            // Calculate totals
+            allPayments.forEach { payment ->
+                val amount = payment.amount
+                totalPaid += amount
+
+                // Check if paid with berry (comment is not null and not empty)
+                if (!payment.notes.isNullOrEmpty()) {
+                    paidWithBerry += amount
+                    Log.d(logTag, "Global payment with berry: ${payment.amount}, notes: '${payment.notes}'")
+                } else {
+                    paidWithMoney += amount
+                    Log.d(logTag, "Global payment with money: ${payment.amount}, no notes")
+                }
+            }
+
+            val totals = PaymentTotals(
+                totalPaid = totalPaid,
+                paidWithBerry = paidWithBerry,
+                paidWithMoney = paidWithMoney
+            )
+
+            Log.d(logTag, "Global payment totals: total=$totalPaid, berry=$paidWithBerry, money=$paidWithMoney")
+            Result.Success(totals)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error getting global payment totals", e)
+            setError("Failed to get global payment totals: ${e.message}")
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Get payment totals for a specific worker.
+     */
+    override suspend fun getWorkerPaymentTotals(workerId: String): Result<PaymentTotals> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Getting payment totals for worker: $workerId")
+
+            // Get all payment records for this worker that are not deleted
+            val workerPayments = realm.query<PaymentRecord>("workerId == $0 AND isDeleted == false", workerId).find()
+            Log.d(logTag, "Found ${workerPayments.size} payment records for worker $workerId")
+
+            var totalPaid = 0.0f
+            var paidWithBerry = 0.0f
+            var paidWithMoney = 0.0f
+
+            // Calculate totals for this worker
+            workerPayments.forEach { payment ->
+                val amount = payment.amount
+                totalPaid += amount
+
+                // Check if paid with berry (comment is not null and not empty)
+                if (!payment.notes.isNullOrEmpty()) {
+                    paidWithBerry += amount
+                    Log.d(logTag, "Worker payment with berry: ${payment.amount}, notes: '${payment.notes}'")
+                } else {
+                    paidWithMoney += amount
+                    Log.d(logTag, "Worker payment with money: ${payment.amount}, no notes")
+                }
+            }
+
+            val totals = PaymentTotals(
+                totalPaid = totalPaid,
+                paidWithBerry = paidWithBerry,
+                paidWithMoney = paidWithMoney
+            )
+
+            Log.d(logTag, "Worker payment totals: total=$totalPaid, berry=$paidWithBerry, money=$paidWithMoney")
+            Result.Success(totals)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error getting worker payment totals", e)
+            setError("Failed to get worker payment totals: ${e.message}")
+            Result.Error(e)
+        }
+    }
+
+    /**
+     * Get daily gather summaries for a specific worker.
+     * Shows punnets collected and earnings per day, handling multiple prices per day.
+     */
+    override suspend fun getWorkerDailyGatherSummaries(workerId: String): Result<List<DailyGatherSummary>> = withDatabaseContext { realm ->
+        try {
+            Log.d(logTag, "Getting daily gather summaries for worker: $workerId")
+
+            // Get all gather records for this worker that are not deleted
+            val allGathers = realm.query<Gather>("workerId == $0", workerId).find()
+                .filter { it.isDeleted != true } // Skip deleted gathers
+
+            Log.d(logTag, "Found ${allGathers.size} total gather records for worker")
+
+            // Used for date parsing
+            val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+            val displayDateFormat = SimpleDateFormat("dd MMMM", Locale("uk", "UA"))
+
+            // Group gathers by date AND price (to handle price changes within a day)
+            val groupedGathers = mutableMapOf<String, MutableList<Gather>>() // Key: "timestamp_price"
+
+            allGathers.forEach { gather ->
+                try {
+                    val dateStr = gather.dateTime
+                    if (dateStr != null) {
+                        val gatherDate = try {
+                            dateFormat.parse(dateStr)?.time ?: 0
+                        } catch (e: Exception) {
+                            Log.e(logTag, "Error parsing gather date: $dateStr", e)
+                            0L
+                        }
+
+                        if (gatherDate > 0) {
+                            // Normalize to start of day
+                            val calendar = Calendar.getInstance()
+                            calendar.timeInMillis = gatherDate
+                            calendar.set(Calendar.HOUR_OF_DAY, 0)
+                            calendar.set(Calendar.MINUTE, 0)
+                            calendar.set(Calendar.SECOND, 0)
+                            calendar.set(Calendar.MILLISECOND, 0)
+                            val dayTimestamp = calendar.timeInMillis
+
+                            val price = gather.punnetCost ?: 0.0f
+                            val groupKey = "${dayTimestamp}_${price}"
+
+                            if (!groupedGathers.containsKey(groupKey)) {
+                                groupedGathers[groupKey] = mutableListOf()
+                            }
+                            groupedGathers[groupKey]?.add(gather)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(logTag, "Error processing gather record", e)
+                }
+            }
+
+            Log.d(logTag, "Grouped gathers into ${groupedGathers.size} groups (day + price combinations)")
+
+            // Create summary for each day/price combination
+            val dailySummaries = mutableListOf<DailyGatherSummary>()
+
+            groupedGathers.forEach { (groupKey, gathersForGroup) ->
+                if (gathersForGroup.isNotEmpty()) {
+                    val firstGather = gathersForGroup.first()
+                    val dateStr = firstGather.dateTime
+
+                    if (dateStr != null) {
+                        val gatherDate = try {
+                            dateFormat.parse(dateStr)?.time ?: 0
+                        } catch (e: Exception) {
+                            0L
+                        }
+
+                        if (gatherDate > 0) {
+                            // Normalize to start of day
+                            val calendar = Calendar.getInstance()
+                            calendar.timeInMillis = gatherDate
+                            calendar.set(Calendar.HOUR_OF_DAY, 0)
+                            calendar.set(Calendar.MINUTE, 0)
+                            calendar.set(Calendar.SECOND, 0)
+                            calendar.set(Calendar.MILLISECOND, 0)
+                            val dayTimestamp = calendar.timeInMillis
+
+                            var totalPunnets = 0
+                            var totalEarnings = 0.0f
+                            val punnetPrice = firstGather.punnetCost ?: 0.0f
+
+                            // Calculate totals for this day/price combination
+                            gathersForGroup.forEach { gather ->
+                                val punnets = gather.numOfPunnets ?: 0
+                                val price = gather.punnetCost ?: 0.0f
+
+                                totalPunnets += punnets
+                                totalEarnings += punnets * price
+
+                                Log.d(logTag, "Gather: $punnets punnets at $price each = ${punnets * price}")
+                            }
+
+                            // Only create summary if there are punnets collected
+                            if (totalPunnets > 0 && punnetPrice > 0) {
+                                // Format date for display
+                                val formattedDate = displayDateFormat.format(Date(dayTimestamp))
+
+                                val summary = DailyGatherSummary(
+                                    date = formattedDate,
+                                    dateTimestamp = dayTimestamp,
+                                    totalPunnets = totalPunnets,
+                                    punnetPrice = punnetPrice,
+                                    totalEarnings = totalEarnings
+                                )
+
+                                dailySummaries.add(summary)
+                                Log.d(logTag, "Created gather summary for $formattedDate: $totalPunnets punnets at ${punnetPrice}₴/punnet = ${totalEarnings}₴ total")
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Sort by date descending, then by price descending (higher prices first)
+            val sortedSummaries = dailySummaries.sortedWith(
+                compareByDescending<DailyGatherSummary> { it.dateTimestamp }
+                    .thenByDescending { it.punnetPrice }
+            )
+
+            Log.d(logTag, "Created ${sortedSummaries.size} daily gather summaries for worker")
+            Result.Success(sortedSummaries)
+        } catch (e: Exception) {
+            Log.e(logTag, "Error getting worker daily gather summaries", e)
+            setError("Failed to get worker gather summaries: ${e.message}")
+            Result.Error(e)
+        }
     }
 }

@@ -34,6 +34,14 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
     private val settingsRepository = app.repositoryProvider.settingsRepository
     private val networkStatusManager = app.networkStatusManager
 
+    // Global payment data
+    private val _globalPaymentHistory = MutableStateFlow<List<PaymentRecord>>(emptyList())
+    val globalPaymentHistory: StateFlow<List<PaymentRecord>> = _globalPaymentHistory.asStateFlow()
+
+    // Combined payment list items (for the adapter)
+    private val _paymentListItems = MutableStateFlow<List<PaymentListItem>>(emptyList())
+    val paymentListItems: StateFlow<List<PaymentListItem>> = _paymentListItems.asStateFlow()
+
     // Mutex for thread-safe operations
     private val operationMutex = Mutex()
     private val dataLoadMutex = Mutex()
@@ -85,6 +93,18 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
     private val _dataInitialized = MutableStateFlow(false)
     val dataInitialized: StateFlow<Boolean> = _dataInitialized.asStateFlow()
 
+    private val _dailyPaymentSummaries = MutableStateFlow<List<DailyPaymentSummary>>(emptyList())
+    val dailyPaymentSummaries: StateFlow<List<DailyPaymentSummary>> = _dailyPaymentSummaries.asStateFlow()
+
+    private val _globalPaymentTotals = MutableStateFlow(PaymentTotals.EMPTY)
+    val globalPaymentTotals: StateFlow<PaymentTotals> = _globalPaymentTotals.asStateFlow()
+
+    private val _workerPaymentTotals = MutableStateFlow(PaymentTotals.EMPTY)
+    val workerPaymentTotals: StateFlow<PaymentTotals> = _workerPaymentTotals.asStateFlow()
+
+    private val _workerGatherSummaries = MutableStateFlow<List<DailyGatherSummary>>(emptyList())
+    val workerGatherSummaries: StateFlow<List<DailyGatherSummary>> = _workerGatherSummaries.asStateFlow()
+
     init {
         initializeViewModel()
     }
@@ -120,12 +140,14 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
         try {
             _isLoading.value = true
 
-            // Load workers and settings synchronously
+            // Load workers, settings, daily summaries, and global totals synchronously
             val workersDeferred = viewModelScope.async { loadWorkersSync() }
             val priceDeferred = viewModelScope.async { loadPunnetPriceSync() }
+            val summariesDeferred = viewModelScope.async { loadDailySummariesSync() }
+            val globalTotalsDeferred = viewModelScope.async { loadGlobalTotalsSync() }
 
-            // Wait for both to complete
-            awaitAll(workersDeferred, priceDeferred)
+            // Wait for all to complete
+            awaitAll(workersDeferred, priceDeferred, summariesDeferred, globalTotalsDeferred)
 
             _dataInitialized.value = true
             Log.d(TAG, "Initial data loaded successfully")
@@ -138,6 +160,26 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private suspend fun loadGlobalTotalsSync(): PaymentTotals {
+        return try {
+            when (val result = paymentRepository.getGlobalPaymentTotals()) {
+                is Result.Success -> {
+                    _globalPaymentTotals.value = result.data
+                    Log.d(TAG, "Loaded global payment totals: ${result.data}")
+                    result.data
+                }
+                is Result.Error -> {
+                    Log.e(TAG, "Error loading global totals", result.exception)
+                    PaymentTotals.EMPTY
+                }
+                is Result.Loading -> PaymentTotals.EMPTY
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading global totals sync", e)
+            PaymentTotals.EMPTY
+        }
+    }
+
     private suspend fun loadWorkersSync(): List<Worker> {
         return try {
             val realm = app.getRealmInstance()
@@ -147,6 +189,26 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
             workers
         } catch (e: Exception) {
             Log.e(TAG, "Error loading workers sync", e)
+            emptyList()
+        }
+    }
+
+    private suspend fun loadDailySummariesSync(): List<DailyPaymentSummary> {
+        return try {
+            when (val result = paymentRepository.getDailyPaymentSummaries()) {
+                is Result.Success -> {
+                    _dailyPaymentSummaries.value = result.data
+                    Log.d(TAG, "Loaded ${result.data.size} daily payment summaries")
+                    result.data
+                }
+                is Result.Error -> {
+                    Log.e(TAG, "Error loading daily summaries", result.exception)
+                    emptyList()
+                }
+                is Result.Loading -> emptyList()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading daily summaries sync", e)
             emptyList()
         }
     }
@@ -168,6 +230,9 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
 
         // Observe workers with live updates
         observeWorkers()
+
+        // Observe global payment history
+        observeGlobalPaymentHistory()
 
         // Observe connection state
         observeConnectionState()
@@ -266,6 +331,9 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
                     // Load all worker data concurrently but safely
                     loadWorkerDataConcurrently(worker._id)
 
+                    // Update payment list items after loading
+                    updatePaymentListItems()
+
                 } catch (e: Exception) {
                     Log.e(TAG, "Error selecting worker", e)
                     _error.value = "Помилка завантаження даних працівника: ${e.message}"
@@ -284,17 +352,24 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
             val earningsDeferred = viewModelScope.async { loadWorkerEarningsSafe(workerId) }
             val punnetsDeferred = viewModelScope.async { loadTodayPunnetCountSafe(workerId) }
             val historyDeferred = viewModelScope.async { loadPaymentHistorySafe(workerId) }
+            val totalsDeferred = viewModelScope.async { loadWorkerTotalsSafe(workerId) }
+            val gatherSummariesDeferred = viewModelScope.async { loadWorkerGatherSummariesSafe(workerId) } // NEW
 
             // Wait for all operations to complete
-            val results = awaitAll(balanceDeferred, earningsDeferred, punnetsDeferred, historyDeferred)
+            val results = awaitAll(balanceDeferred, earningsDeferred, punnetsDeferred, historyDeferred, totalsDeferred, gatherSummariesDeferred)
 
             // Update UI with results
             _workerBalance.value = results[0] as Float
             _workerEarnings.value = results[1] as Float
             _todayPunnetCount.value = results[2] as Int
             _paymentHistory.value = results[3] as List<PaymentRecord>
+            _workerPaymentTotals.value = results[4] as PaymentTotals
+            _workerGatherSummaries.value = results[5] as List<DailyGatherSummary> // NEW
 
             Log.d(TAG, "Worker data loaded successfully")
+
+            // Update payment list items
+            updatePaymentListItems()
 
             // Check for balance discrepancies after all data is loaded
             checkBalanceDiscrepancy()
@@ -302,6 +377,41 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
         } catch (e: Exception) {
             Log.e(TAG, "Error loading worker data concurrently", e)
             _error.value = "Помилка завантаження даних працівника: ${e.message}"
+        }
+    }
+
+    private suspend fun loadWorkerGatherSummariesSafe(workerId: String): List<DailyGatherSummary> {
+        return try {
+            when (val result = paymentRepository.getWorkerDailyGatherSummaries(workerId)) {
+                is Result.Success -> {
+                    Log.d(TAG, "Loaded ${result.data.size} gather summaries for worker")
+                    result.data
+                }
+                is Result.Error -> {
+                    Log.e(TAG, "Error loading worker gather summaries", result.exception)
+                    emptyList()
+                }
+                is Result.Loading -> emptyList()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading worker gather summaries", e)
+            emptyList()
+        }
+    }
+
+    private suspend fun loadWorkerTotalsSafe(workerId: String): PaymentTotals {
+        return try {
+            when (val result = paymentRepository.getWorkerPaymentTotals(workerId)) {
+                is Result.Success -> result.data
+                is Result.Error -> {
+                    Log.e(TAG, "Error loading worker totals", result.exception)
+                    PaymentTotals.EMPTY
+                }
+                is Result.Loading -> PaymentTotals.EMPTY
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading worker totals", e)
+            PaymentTotals.EMPTY
         }
     }
 
@@ -441,11 +551,6 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
             return
         }
 
-        if (amount > balance) {
-            _error.value = "Payment amount cannot exceed balance"
-            return
-        }
-
         makePayment(worker._id, amount, notes)
     }
 
@@ -461,6 +566,10 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
                             _success.value = "Payment recorded successfully"
                             // Refresh worker data
                             refreshWorkerData(workerId)
+                            // Refresh daily summaries
+                            refreshDailySummaries()
+                            // Refresh global totals
+                            refreshGlobalTotals()
                         }
                         is Result.Error -> {
                             _error.value = "Failed to record payment: ${result.message}"
@@ -480,14 +589,123 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private fun observeGlobalPaymentHistory() {
+        viewModelScope.launch {
+            try {
+                paymentRepository.getAll()
+                    .distinctUntilChanged()
+                    .collect { result ->
+                        if (isCleanedUp.get()) return@collect
+
+                        when (result) {
+                            is Result.Success -> {
+                                _globalPaymentHistory.value = result.data
+                                updatePaymentListItems()
+
+                                // Also refresh daily summaries and global totals when global payments change
+                                refreshDailySummaries()
+                                refreshGlobalTotals()
+
+                                Log.d(TAG, "Global payment history updated: ${result.data.size} payments")
+                            }
+                            is Result.Error -> {
+                                Log.e(TAG, "Error observing global payment history", result.exception)
+                            }
+                            is Result.Loading -> {
+                                // Loading handled elsewhere
+                            }
+                        }
+                    }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error setting up global payment history observer", e)
+            }
+        }
+    }
+
+    private fun refreshGlobalTotals() {
+        viewModelScope.launch {
+            try {
+                when (val result = paymentRepository.getGlobalPaymentTotals()) {
+                    is Result.Success -> {
+                        _globalPaymentTotals.value = result.data
+                        Log.d(TAG, "Refreshed global totals: ${result.data}")
+                    }
+                    is Result.Error -> {
+                        Log.e(TAG, "Error refreshing global totals", result.exception)
+                    }
+                    is Result.Loading -> {
+                        // Loading handled elsewhere
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error refreshing global totals", e)
+            }
+        }
+    }
+
+    private fun refreshDailySummaries() {
+        viewModelScope.launch {
+            try {
+                when (val result = paymentRepository.getDailyPaymentSummaries()) {
+                    is Result.Success -> {
+                        _dailyPaymentSummaries.value = result.data
+                        Log.d(TAG, "Refreshed daily summaries: ${result.data.size} summaries")
+                    }
+                    is Result.Error -> {
+                        Log.e(TAG, "Error refreshing daily summaries", result.exception)
+                    }
+                    is Result.Loading -> {
+                        // Loading handled elsewhere
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error refreshing daily summaries", e)
+            }
+        }
+    }
+
+    private fun updatePaymentListItems() {
+        val selectedWorker = _selectedWorker.value
+        val allWorkers = _allWorkers.value
+
+        if (selectedWorker != null) {
+            // Show worker's payments AND gather summaries combined - WORKER VIEW MODE
+            val workerPayments = _paymentHistory.value
+            val gatherSummaries = _workerGatherSummaries.value
+            val listItems = groupPaymentsByDateWithGathers(
+                payments = workerPayments,
+                gatherSummaries = gatherSummaries,
+                workers = emptyList(), // No worker names needed for worker view
+                showWorkerNames = false,
+                isWorkerView = true // Enable worker view mode
+            )
+            _paymentListItems.value = listItems
+            Log.d(TAG, "Updated payment list items with ${workerPayments.size} payments and ${gatherSummaries.size} gather summaries (worker view)")
+        } else {
+            // Show global payment history grouped by date with worker names - GLOBAL VIEW MODE
+            val globalPayments = _globalPaymentHistory.value
+            val listItems = groupPaymentsByDate(
+                payments = globalPayments,
+                workers = allWorkers,
+                showWorkerNames = true
+            )
+            _paymentListItems.value = listItems
+            Log.d(TAG, "Updated payment list items with ${globalPayments.size} global payments (global view)")
+        }
+    }
+
     private suspend fun refreshWorkerData(workerId: String) {
         try {
             // Reload only the data that changed
             val newBalance = loadWorkerBalanceSafe(workerId)
             val newHistory = loadPaymentHistorySafe(workerId)
+            val newTotals = loadWorkerTotalsSafe(workerId)
+            val newGatherSummaries = loadWorkerGatherSummariesSafe(workerId) // NEW
 
             _workerBalance.value = newBalance
             _paymentHistory.value = newHistory
+            _workerPaymentTotals.value = newTotals
+            _workerGatherSummaries.value = newGatherSummaries // NEW
 
             Log.d(TAG, "Worker data refreshed after payment")
         } catch (e: Exception) {
@@ -514,8 +732,14 @@ class PaymentViewModel(application: Application) : AndroidViewModel(application)
         _workerEarnings.value = 0.0f
         _todayPunnetCount.value = 0
         _paymentHistory.value = emptyList()
+        _workerPaymentTotals.value = PaymentTotals.EMPTY
+        _workerGatherSummaries.value = emptyList() // NEW
         isLoadingWorkerData.set(false)
+
+        // Update to show global history
+        updatePaymentListItems()
     }
+
 
     fun ensureDataLoaded() {
         if (!_dataInitialized.value && !isCleanedUp.get()) {
